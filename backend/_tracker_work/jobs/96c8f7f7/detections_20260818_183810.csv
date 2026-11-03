@@ -1,0 +1,18 @@
+--- BALL DETECTIONS ---
+frame,timestamp_sec,event_type,class,conf,x1,y1,x2,y2,cx,cy,width,height,grid_row,grid_col
+24,0.8,detection,ball,0.8168,790,311,804,327,797,319,14,16,,
+48,1.6,detection,ball,0.6328,840,229,850,239,845,234,10,10,,
+49,1.6333,detection,ball,0.6288,844,229,855,241,849,235,11,12,,
+50,1.6667,detection,ball,0.4205,847,238,861,255,854,246,14,17,,
+51,1.7,detection,ball,0.7716,850,252,863,267,856,259,13,15,,
+52,1.7333,detection,ball,0.3454,854,267,864,281,859,274,10,14,,
+54,1.8,detection,ball,0.606,857,286,867,296,862,291,10,10,,
+55,1.8333,detection,ball,0.732,861,299,869,308,865,303,8,9,,
+57,1.9,detection,ball,0.7979,866,335,877,347,871,341,11,12,80,4
+61,2.0333,detection,ball,0.4081,877,382,886,392,881,387,9,10,63,5
+62,2.0667,detection,ball,0.5788,877,386,886,393,881,389,9,7,62,5
+63,2.1,detection,ball,0.6992,877,385,886,392,881,388,9,7,62,5
+75,2.5,detection,ball,0.7474,1054,216,1064,226,1059,221,10,10,,
+
+--- BAT DETECTIONS ---
+frame,timestamp_sec,event_type,class,conf,x1,y1,x2,y2,cx,cy,width,height,grid_row,grid_col

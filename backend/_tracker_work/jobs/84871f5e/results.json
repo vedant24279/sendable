@@ -1,0 +1,205 @@
+{
+  "calibration": {
+    "bat_L": [
+      320,
+      267
+    ],
+    "bat_R": [
+      573,
+      263
+    ],
+    "bat_stump": [
+      445,
+      253
+    ],
+    "bowl_L": [
+      289,
+      412
+    ],
+    "bowl_R": [
+      620,
+      406
+    ],
+    "bowl_stump": [
+      456,
+      422
+    ]
+  },
+  "events": {
+    "bounce": {
+      "frame": 49,
+      "grid_cell": null,
+      "interpolated": false,
+      "length_m": null,
+      "timestamp_sec": 1.96,
+      "x": 315,
+      "y": 240,
+      "zone": null
+    },
+    "deviation": {
+      "frame": 66,
+      "timestamp_sec": 2.64,
+      "x": 77,
+      "y": 208
+    },
+    "impact": null,
+    "release": {
+      "frame": 30,
+      "timestamp_sec": 1.2,
+      "x": 508,
+      "y": 151
+    }
+  },
+  "job_id": "84871f5e",
+  "outputs": {
+    "annotated_video_url": "output.mp4",
+    "csv_url": "detections_20260901_190423.csv",
+    "first_frame_url": "first_frame.jpg"
+  },
+  "schema_version": 1,
+  "segments": {
+    "seg_a_bounce_sec": 1.96,
+    "seg_a_deviation_sec": 2.64,
+    "seg_a_end_sec": 3.88,
+    "seg_a_release_sec": 1.2,
+    "seg_a_start_sec": 0.0,
+    "seg_b_bounce_sec": 5.8,
+    "seg_b_deviation_sec": 7.16,
+    "seg_b_end_sec": 7.64,
+    "seg_b_release_sec": 4.28,
+    "seg_b_start_sec": 3.88,
+    "seg_c_bd_end_sec": 10.52,
+    "seg_c_end_sec": 11.52,
+    "seg_c_rb_end_sec": 9.16,
+    "seg_c_start_sec": 7.64
+  },
+  "stats": {
+    "detection_rate": 1.0,
+    "frames_interpolated": 0,
+    "frames_with_ball": 104,
+    "processing_time_sec": 1026.73
+  },
+  "trajectory": [
+    {
+      "conf": 0.8969,
+      "frame": 30,
+      "interpolated": false,
+      "x": 508,
+      "y": 151
+    },
+    {
+      "conf": 0.9171,
+      "frame": 31,
+      "interpolated": false,
+      "x": 497,
+      "y": 159
+    },
+    {
+      "conf": 0.911,
+      "frame": 33,
+      "interpolated": false,
+      "x": 473,
+      "y": 184
+    },
+    {
+      "conf": 0.8962,
+      "frame": 34,
+      "interpolated": false,
+      "x": 463,
+      "y": 200
+    },
+    {
+      "conf": 0.4759,
+      "frame": 43,
+      "interpolated": false,
+      "x": 498,
+      "y": 69
+    },
+    {
+      "conf": 0.5063,
+      "frame": 44,
+      "interpolated": false,
+      "x": 500,
+      "y": 64
+    },
+    {
+      "conf": 0.5929,
+      "frame": 46,
+      "interpolated": false,
+      "x": 373,
+      "y": 77
+    },
+    {
+      "conf": 0.8729,
+      "frame": 48,
+      "interpolated": false,
+      "x": 330,
+      "y": 208
+    },
+    {
+      "conf": 0.8902,
+      "frame": 49,
+      "interpolated": false,
+      "x": 315,
+      "y": 237
+    },
+    {
+      "conf": 0.4774,
+      "frame": 54,
+      "interpolated": false,
+      "x": 552,
+      "y": 200
+    },
+    {
+      "conf": 0.8467,
+      "frame": 65,
+      "interpolated": false,
+      "x": 101,
+      "y": 211
+    },
+    {
+      "conf": 0.4424,
+      "frame": 66,
+      "interpolated": false,
+      "x": 77,
+      "y": 208
+    },
+    {
+      "conf": 0.6717,
+      "frame": 67,
+      "interpolated": false,
+      "x": 71,
+      "y": 203
+    },
+    {
+      "conf": 0.8575,
+      "frame": 68,
+      "interpolated": false,
+      "x": 65,
+      "y": 199
+    },
+    {
+      "conf": 0.7562,
+      "frame": 69,
+      "interpolated": false,
+      "x": 57,
+      "y": 197
+    },
+    {
+      "conf": 0.8765,
+      "frame": 70,
+      "interpolated": false,
+      "x": 49,
+      "y": 196
+    }
+  ],
+  "video": {
+    "duration_sec": 10.32,
+    "filename": "sirclip3.mp4",
+    "fps": 25.0,
+    "frame_count": 258,
+    "height": 480,
+    "width": 848
+  },
+  "warnings": []
+}

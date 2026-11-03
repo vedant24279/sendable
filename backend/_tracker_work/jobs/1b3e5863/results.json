@@ -1,0 +1,234 @@
+{
+  "ball_type": "red",
+  "calibration": {
+    "bat_L": [
+      733,
+      508
+    ],
+    "bat_R": [
+      1219,
+      508
+    ],
+    "bat_stump": [
+      976,
+      486
+    ],
+    "bowl_L": [
+      686,
+      873
+    ],
+    "bowl_R": [
+      1285,
+      878
+    ],
+    "bowl_stump": [
+      986,
+      874
+    ]
+  },
+  "events": {
+    "bounce": null,
+    "deviation": null,
+    "impact": null,
+    "release": {
+      "frame": 9,
+      "timestamp_sec": 0.3,
+      "x": 830,
+      "y": 382
+    }
+  },
+  "job_id": "1b3e5863",
+  "outputs": {
+    "annotated_video_url": "output.mp4",
+    "csv_url": "detections_20261002_175438.csv",
+    "first_frame_url": "first_frame.jpg"
+  },
+  "schema_version": 1,
+  "segments": {
+    "seg_a_bounce_sec": null,
+    "seg_a_deviation_sec": null,
+    "seg_a_end_sec": 1.8,
+    "seg_a_release_sec": 0.3,
+    "seg_a_start_sec": 0.0,
+    "seg_b_bounce_sec": null,
+    "seg_b_deviation_sec": null,
+    "seg_b_end_sec": 1.8,
+    "seg_b_release_sec": null,
+    "seg_b_start_sec": 1.8,
+    "seg_c_bd_end_sec": null,
+    "seg_c_end_sec": null,
+    "seg_c_rb_end_sec": null,
+    "seg_c_start_sec": null
+  },
+  "stats": {
+    "detection_rate": 1.0,
+    "frames_interpolated": 0,
+    "frames_with_ball": 22,
+    "processing_time_sec": 85.27
+  },
+  "trajectory": [
+    {
+      "conf": 0.7639,
+      "frame": 9,
+      "interpolated": false,
+      "x": 830,
+      "y": 382
+    },
+    {
+      "conf": 0.8121,
+      "frame": 10,
+      "interpolated": false,
+      "x": 837,
+      "y": 382
+    },
+    {
+      "conf": 0.7905,
+      "frame": 11,
+      "interpolated": false,
+      "x": 850,
+      "y": 385
+    },
+    {
+      "conf": 0.7782,
+      "frame": 12,
+      "interpolated": false,
+      "x": 865,
+      "y": 390
+    },
+    {
+      "conf": 0.7859,
+      "frame": 13,
+      "interpolated": false,
+      "x": 873,
+      "y": 394
+    },
+    {
+      "conf": 0.7835,
+      "frame": 14,
+      "interpolated": false,
+      "x": 885,
+      "y": 403
+    },
+    {
+      "conf": 0.7976,
+      "frame": 15,
+      "interpolated": false,
+      "x": 898,
+      "y": 414
+    },
+    {
+      "conf": 0.8075,
+      "frame": 16,
+      "interpolated": false,
+      "x": 906,
+      "y": 421
+    },
+    {
+      "conf": 0.7894,
+      "frame": 17,
+      "interpolated": false,
+      "x": 916,
+      "y": 435
+    },
+    {
+      "conf": 0.8063,
+      "frame": 18,
+      "interpolated": false,
+      "x": 928,
+      "y": 451
+    },
+    {
+      "conf": 0.7618,
+      "frame": 19,
+      "interpolated": false,
+      "x": 935,
+      "y": 462
+    },
+    {
+      "conf": 0.7676,
+      "frame": 20,
+      "interpolated": false,
+      "x": 945,
+      "y": 478
+    },
+    {
+      "conf": 0.7539,
+      "frame": 21,
+      "interpolated": false,
+      "x": 955,
+      "y": 498
+    },
+    {
+      "conf": 0.7572,
+      "frame": 22,
+      "interpolated": false,
+      "x": 961,
+      "y": 512
+    },
+    {
+      "conf": 0.7488,
+      "frame": 23,
+      "interpolated": false,
+      "x": 969,
+      "y": 532
+    },
+    {
+      "conf": 0.7181,
+      "frame": 32,
+      "interpolated": false,
+      "x": 991,
+      "y": 217
+    },
+    {
+      "conf": 0.7559,
+      "frame": 41,
+      "interpolated": false,
+      "x": 1007,
+      "y": 88
+    },
+    {
+      "conf": 0.7887,
+      "frame": 42,
+      "interpolated": false,
+      "x": 1009,
+      "y": 84
+    },
+    {
+      "conf": 0.734,
+      "frame": 43,
+      "interpolated": false,
+      "x": 1010,
+      "y": 82
+    },
+    {
+      "conf": 0.7499,
+      "frame": 44,
+      "interpolated": false,
+      "x": 1013,
+      "y": 82
+    },
+    {
+      "conf": 0.7433,
+      "frame": 45,
+      "interpolated": false,
+      "x": 1015,
+      "y": 83
+    },
+    {
+      "conf": 0.3713,
+      "frame": 47,
+      "interpolated": false,
+      "x": 1019,
+      "y": 90
+    }
+  ],
+  "video": {
+    "duration_sec": 1.8,
+    "filename": "nvcut2.mp4",
+    "fps": 30.0,
+    "frame_count": 54,
+    "height": 1080,
+    "width": 1920
+  },
+  "warnings": []
+}

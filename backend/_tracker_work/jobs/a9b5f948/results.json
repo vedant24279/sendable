@@ -1,0 +1,114 @@
+{
+  "calibration": {
+    "bat_L": [
+      821,
+      451
+    ],
+    "bat_R": [
+      1135,
+      451
+    ],
+    "bat_stump": [
+      978,
+      440
+    ],
+    "bowl_L": [
+      742,
+      664
+    ],
+    "bowl_R": [
+      1181,
+      664
+    ],
+    "bowl_stump": [
+      957,
+      687
+    ]
+  },
+  "events": {
+    "bounce": null,
+    "deviation": null,
+    "impact": null,
+    "release": {
+      "frame": 35,
+      "timestamp_sec": 1.1667,
+      "x": 880,
+      "y": 354
+    }
+  },
+  "job_id": "a9b5f948",
+  "outputs": {
+    "annotated_video_url": "output.mp4",
+    "csv_url": "detections_20260818_184518.csv",
+    "first_frame_url": "first_frame.jpg"
+  },
+  "schema_version": 1,
+  "segments": {
+    "seg_a_bounce_sec": null,
+    "seg_a_deviation_sec": null,
+    "seg_a_end_sec": 2.2,
+    "seg_a_release_sec": 1.0,
+    "seg_a_start_sec": 0.0,
+    "seg_b_bounce_sec": null,
+    "seg_b_deviation_sec": null,
+    "seg_b_end_sec": 2.2,
+    "seg_b_release_sec": null,
+    "seg_b_start_sec": 2.2,
+    "seg_c_bd_end_sec": null,
+    "seg_c_end_sec": null,
+    "seg_c_rb_end_sec": null,
+    "seg_c_start_sec": null
+  },
+  "stats": {
+    "detection_rate": 1.0,
+    "frames_interpolated": 0,
+    "frames_with_ball": 5,
+    "processing_time_sec": 120.26
+  },
+  "trajectory": [
+    {
+      "conf": 0.8177,
+      "frame": 35,
+      "interpolated": false,
+      "x": 880,
+      "y": 354
+    },
+    {
+      "conf": 0.7841,
+      "frame": 36,
+      "interpolated": false,
+      "x": 885,
+      "y": 362
+    },
+    {
+      "conf": 0.8573,
+      "frame": 37,
+      "interpolated": false,
+      "x": 889,
+      "y": 373
+    },
+    {
+      "conf": 0.4162,
+      "frame": 38,
+      "interpolated": false,
+      "x": 893,
+      "y": 386
+    },
+    {
+      "conf": 0.3153,
+      "frame": 39,
+      "interpolated": false,
+      "x": 896,
+      "y": 399
+    }
+  ],
+  "video": {
+    "duration_sec": 2.3667,
+    "filename": "pinkclip8.mp4",
+    "fps": 30.0,
+    "frame_count": 71,
+    "height": 1080,
+    "width": 1920
+  },
+  "warnings": []
+}

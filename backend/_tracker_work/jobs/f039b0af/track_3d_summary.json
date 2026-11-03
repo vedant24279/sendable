@@ -1,0 +1,31 @@
+{
+  "job_id": "f039b0af",
+  "filename": "redns3.mp4",
+  "detections_used": 10,
+  "window_frames": [
+    3,
+    12
+  ],
+  "reprojection_px": {
+    "mean": 1.210458846418973,
+    "max": 2.1854717495660823
+  },
+  "release_pos_m": [
+    -0.645,
+    2.553,
+    22.553
+  ],
+  "release_speed_ms": 50.55,
+  "release_speed_kmh": 182.0,
+  "bounce_pos_m": [
+    -0.404,
+    0.036,
+    8.242
+  ],
+  "bounce_time_s": 0.2862,
+  "restitution": 0.3,
+  "tangential_friction": 0.55,
+  "fit_cost_px2": 9.482,
+  "pose_reprojection_mean_px": 6.433548469825354,
+  "pose_reprojection_max_px": 14.917533735520546
+}

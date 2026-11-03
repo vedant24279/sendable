@@ -1,0 +1,251 @@
+{
+  "ball_type": "red",
+  "calibration": {
+    "bat_L": [
+      774,
+      433
+    ],
+    "bat_R": [
+      1111,
+      435
+    ],
+    "bat_stump": [
+      939,
+      405
+    ],
+    "bowl_L": [
+      754,
+      796
+    ],
+    "bowl_R": [
+      1182,
+      794
+    ],
+    "bowl_stump": [
+      958,
+      817
+    ]
+  },
+  "events": {
+    "bounce": {
+      "frame": 27,
+      "grid_cell": [
+        61,
+        8
+      ],
+      "interpolated": false,
+      "length_m": 6.619,
+      "timestamp_sec": 0.9,
+      "x": 938,
+      "y": 514,
+      "zone": "GOOD"
+    },
+    "deviation": {
+      "frame": 33,
+      "timestamp_sec": 1.1,
+      "x": 890,
+      "y": 354
+    },
+    "impact": null,
+    "release": {
+      "frame": 16,
+      "timestamp_sec": 0.5333,
+      "x": 849,
+      "y": 458
+    }
+  },
+  "job_id": "53b3d4c7",
+  "outputs": {
+    "annotated_video_url": "output.mp4",
+    "csv_url": "detections_20261006_123200.csv",
+    "first_frame_url": "first_frame.jpg"
+  },
+  "schema_version": 1,
+  "segments": {
+    "seg_a_bounce_sec": 0.9,
+    "seg_a_deviation_sec": 1.1,
+    "seg_a_end_sec": 2.1,
+    "seg_a_release_sec": 0.5333,
+    "seg_a_start_sec": 0.0,
+    "seg_b_bounce_sec": 3.1667,
+    "seg_b_deviation_sec": 3.5667,
+    "seg_b_end_sec": 3.9667,
+    "seg_b_release_sec": 2.4333,
+    "seg_b_start_sec": 2.1,
+    "seg_c_bd_end_sec": 5.1,
+    "seg_c_end_sec": 6.1,
+    "seg_c_rb_end_sec": 4.7,
+    "seg_c_start_sec": 3.9667
+  },
+  "stats": {
+    "detection_rate": 1.0,
+    "frames_interpolated": 0,
+    "frames_with_ball": 41,
+    "processing_time_sec": 105.9
+  },
+  "trajectory": [
+    {
+      "conf": 0.7844,
+      "frame": 16,
+      "interpolated": false,
+      "x": 849,
+      "y": 458
+    },
+    {
+      "conf": 0.754,
+      "frame": 17,
+      "interpolated": false,
+      "x": 861,
+      "y": 455
+    },
+    {
+      "conf": 0.7579,
+      "frame": 18,
+      "interpolated": false,
+      "x": 875,
+      "y": 455
+    },
+    {
+      "conf": 0.7713,
+      "frame": 19,
+      "interpolated": false,
+      "x": 888,
+      "y": 456
+    },
+    {
+      "conf": 0.7752,
+      "frame": 20,
+      "interpolated": false,
+      "x": 896,
+      "y": 456
+    },
+    {
+      "conf": 0.817,
+      "frame": 21,
+      "interpolated": false,
+      "x": 907,
+      "y": 461
+    },
+    {
+      "conf": 0.7824,
+      "frame": 22,
+      "interpolated": false,
+      "x": 917,
+      "y": 467
+    },
+    {
+      "conf": 0.7663,
+      "frame": 23,
+      "interpolated": false,
+      "x": 923,
+      "y": 474
+    },
+    {
+      "conf": 0.7714,
+      "frame": 24,
+      "interpolated": false,
+      "x": 927,
+      "y": 482
+    },
+    {
+      "conf": 0.7523,
+      "frame": 25,
+      "interpolated": false,
+      "x": 932,
+      "y": 491
+    },
+    {
+      "conf": 0.7497,
+      "frame": 26,
+      "interpolated": false,
+      "x": 936,
+      "y": 502
+    },
+    {
+      "conf": 0.8067,
+      "frame": 27,
+      "interpolated": false,
+      "x": 938,
+      "y": 508
+    },
+    {
+      "conf": 0.596,
+      "frame": 28,
+      "interpolated": false,
+      "x": 938,
+      "y": 480
+    },
+    {
+      "conf": 0.5751,
+      "frame": 30,
+      "interpolated": false,
+      "x": 880,
+      "y": 424
+    },
+    {
+      "conf": 0.4424,
+      "frame": 31,
+      "interpolated": false,
+      "x": 869,
+      "y": 415
+    },
+    {
+      "conf": 0.3627,
+      "frame": 32,
+      "interpolated": false,
+      "x": 869,
+      "y": 416
+    },
+    {
+      "conf": 0.6883,
+      "frame": 33,
+      "interpolated": false,
+      "x": 890,
+      "y": 354
+    },
+    {
+      "conf": 0.7109,
+      "frame": 34,
+      "interpolated": false,
+      "x": 882,
+      "y": 321
+    },
+    {
+      "conf": 0.7116,
+      "frame": 35,
+      "interpolated": false,
+      "x": 856,
+      "y": 306
+    },
+    {
+      "conf": 0.7328,
+      "frame": 36,
+      "interpolated": false,
+      "x": 828,
+      "y": 298
+    },
+    {
+      "conf": 0.6664,
+      "frame": 37,
+      "interpolated": false,
+      "x": 802,
+      "y": 292
+    },
+    {
+      "conf": 0.7536,
+      "frame": 38,
+      "interpolated": false,
+      "x": 776,
+      "y": 286
+    }
+  ],
+  "video": {
+    "duration_sec": 2.1,
+    "filename": "redt1.mp4",
+    "fps": 30.0,
+    "frame_count": 63,
+    "height": 1080,
+    "width": 1920
+  },
+  "warnings": []
+}

@@ -1,0 +1,142 @@
+{
+  "calibration": {
+    "bat_L": [
+      794,
+      345
+    ],
+    "bat_R": [
+      1120,
+      341
+    ],
+    "bat_stump": [
+      959,
+      330
+    ],
+    "bowl_L": [
+      733,
+      546
+    ],
+    "bowl_R": [
+      1180,
+      539
+    ],
+    "bowl_stump": [
+      972,
+      539
+    ]
+  },
+  "events": {
+    "bounce": null,
+    "deviation": null,
+    "impact": null,
+    "release": {
+      "frame": 64,
+      "timestamp_sec": 2.1333,
+      "x": 819,
+      "y": 222
+    }
+  },
+  "job_id": "12bb0820",
+  "outputs": {
+    "annotated_video_url": "output.mp4",
+    "csv_url": "detections_20260818_184122.csv",
+    "first_frame_url": "first_frame.jpg"
+  },
+  "schema_version": 1,
+  "segments": {
+    "seg_a_bounce_sec": null,
+    "seg_a_deviation_sec": null,
+    "seg_a_end_sec": 1.9333,
+    "seg_a_release_sec": 1.0,
+    "seg_a_start_sec": 0.0,
+    "seg_b_bounce_sec": null,
+    "seg_b_deviation_sec": null,
+    "seg_b_end_sec": 1.9333,
+    "seg_b_release_sec": null,
+    "seg_b_start_sec": 1.9333,
+    "seg_c_bd_end_sec": null,
+    "seg_c_end_sec": null,
+    "seg_c_rb_end_sec": null,
+    "seg_c_start_sec": null
+  },
+  "stats": {
+    "detection_rate": 1.0,
+    "frames_interpolated": 0,
+    "frames_with_ball": 9,
+    "processing_time_sec": 136.15
+  },
+  "trajectory": [
+    {
+      "conf": 0.8222,
+      "frame": 64,
+      "interpolated": false,
+      "x": 819,
+      "y": 222
+    },
+    {
+      "conf": 0.7995,
+      "frame": 65,
+      "interpolated": false,
+      "x": 831,
+      "y": 231
+    },
+    {
+      "conf": 0.8017,
+      "frame": 66,
+      "interpolated": false,
+      "x": 843,
+      "y": 245
+    },
+    {
+      "conf": 0.8023,
+      "frame": 67,
+      "interpolated": false,
+      "x": 847,
+      "y": 248
+    },
+    {
+      "conf": 0.7269,
+      "frame": 68,
+      "interpolated": false,
+      "x": 856,
+      "y": 258
+    },
+    {
+      "conf": 0.4331,
+      "frame": 70,
+      "interpolated": false,
+      "x": 876,
+      "y": 291
+    },
+    {
+      "conf": 0.3454,
+      "frame": 71,
+      "interpolated": false,
+      "x": 885,
+      "y": 312
+    },
+    {
+      "conf": 0.7873,
+      "frame": 72,
+      "interpolated": false,
+      "x": 895,
+      "y": 329
+    },
+    {
+      "conf": 0.7831,
+      "frame": 73,
+      "interpolated": false,
+      "x": 897,
+      "y": 333
+    }
+  ],
+  "video": {
+    "duration_sec": 3.0667,
+    "filename": "pinkclip4.mp4",
+    "fps": 30.0,
+    "frame_count": 92,
+    "height": 1080,
+    "width": 1920
+  },
+  "warnings": []
+}

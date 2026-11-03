@@ -1,0 +1,11 @@
+--- BALL DETECTIONS ---
+frame,timestamp_sec,event_type,class,conf,x1,y1,x2,y2,cx,cy,width,height,grid_row,grid_col
+35,1.1667,detection,ball,0.7581,812,228,824,240,818,234,12,12,,
+36,1.2,detection,ball,0.7657,812,228,824,241,818,234,12,13,,
+37,1.2333,detection,ball,0.4214,820,243,834,259,827,251,14,16,,
+44,1.4667,detection,ball,0.5653,880,384,887,393,883,388,7,9,60,5
+50,1.6667,detection,ball,0.8175,897,277,907,289,902,283,10,12,,
+75,2.5,detection,ball,0.7646,1054,216,1064,226,1059,221,10,10,,
+
+--- BAT DETECTIONS ---
+frame,timestamp_sec,event_type,class,conf,x1,y1,x2,y2,cx,cy,width,height,grid_row,grid_col

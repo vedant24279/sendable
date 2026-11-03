@@ -1,0 +1,236 @@
+{
+  "calibration": {
+    "bat_L": [
+      815,
+      454
+    ],
+    "bat_R": [
+      1122,
+      452
+    ],
+    "bat_stump": [
+      969,
+      430
+    ],
+    "bowl_L": [
+      769,
+      762
+    ],
+    "bowl_R": [
+      1154,
+      762
+    ],
+    "bowl_stump": [
+      963,
+      770
+    ]
+  },
+  "events": {
+    "bounce": {
+      "frame": 15,
+      "grid_cell": [
+        59,
+        8
+      ],
+      "interpolated": false,
+      "length_m": 6.966,
+      "timestamp_sec": 0.5,
+      "x": 955,
+      "y": 527,
+      "zone": "GOOD"
+    },
+    "deviation": {
+      "frame": 17,
+      "timestamp_sec": 0.5667,
+      "x": 960,
+      "y": 516
+    },
+    "impact": null,
+    "release": {
+      "frame": 1,
+      "timestamp_sec": 0.0333,
+      "x": 906,
+      "y": 640
+    }
+  },
+  "job_id": "3de7c29c",
+  "outputs": {
+    "annotated_video_url": "output.mp4",
+    "csv_url": "detections_20260914_194327.csv",
+    "first_frame_url": "first_frame.jpg"
+  },
+  "schema_version": 1,
+  "segments": {
+    "seg_a_bounce_sec": 0.5,
+    "seg_a_deviation_sec": 0.5667,
+    "seg_a_end_sec": 1.6,
+    "seg_a_release_sec": 0.0333,
+    "seg_a_start_sec": 0.0,
+    "seg_b_bounce_sec": 2.8667,
+    "seg_b_deviation_sec": 3.0,
+    "seg_b_end_sec": 3.1333,
+    "seg_b_release_sec": 1.9333,
+    "seg_b_start_sec": 1.6,
+    "seg_c_bd_end_sec": 4.2,
+    "seg_c_end_sec": 5.2,
+    "seg_c_rb_end_sec": 4.0667,
+    "seg_c_start_sec": 3.1333
+  },
+  "stats": {
+    "detection_rate": 1.0,
+    "frames_interpolated": 0,
+    "frames_with_ball": 30,
+    "processing_time_sec": 22.25
+  },
+  "trajectory": [
+    {
+      "conf": 0.6929,
+      "frame": 0,
+      "interpolated": false,
+      "x": 897,
+      "y": 670
+    },
+    {
+      "conf": 0.6161,
+      "frame": 1,
+      "interpolated": false,
+      "x": 906,
+      "y": 640
+    },
+    {
+      "conf": 0.6662,
+      "frame": 2,
+      "interpolated": false,
+      "x": 897,
+      "y": 591
+    },
+    {
+      "conf": 0.6924,
+      "frame": 3,
+      "interpolated": false,
+      "x": 863,
+      "y": 537
+    },
+    {
+      "conf": 0.6937,
+      "frame": 4,
+      "interpolated": false,
+      "x": 838,
+      "y": 495
+    },
+    {
+      "conf": 0.6936,
+      "frame": 5,
+      "interpolated": false,
+      "x": 832,
+      "y": 486
+    },
+    {
+      "conf": 0.7683,
+      "frame": 6,
+      "interpolated": false,
+      "x": 844,
+      "y": 470
+    },
+    {
+      "conf": 0.7381,
+      "frame": 7,
+      "interpolated": false,
+      "x": 866,
+      "y": 465
+    },
+    {
+      "conf": 0.7566,
+      "frame": 8,
+      "interpolated": false,
+      "x": 886,
+      "y": 467
+    },
+    {
+      "conf": 0.746,
+      "frame": 9,
+      "interpolated": false,
+      "x": 904,
+      "y": 472
+    },
+    {
+      "conf": 0.7272,
+      "frame": 10,
+      "interpolated": false,
+      "x": 917,
+      "y": 481
+    },
+    {
+      "conf": 0.7274,
+      "frame": 11,
+      "interpolated": false,
+      "x": 919,
+      "y": 483
+    },
+    {
+      "conf": 0.7612,
+      "frame": 12,
+      "interpolated": false,
+      "x": 927,
+      "y": 489
+    },
+    {
+      "conf": 0.7555,
+      "frame": 13,
+      "interpolated": false,
+      "x": 937,
+      "y": 497
+    },
+    {
+      "conf": 0.6615,
+      "frame": 14,
+      "interpolated": false,
+      "x": 947,
+      "y": 507
+    },
+    {
+      "conf": 0.7377,
+      "frame": 15,
+      "interpolated": false,
+      "x": 955,
+      "y": 521
+    },
+    {
+      "conf": 0.7071,
+      "frame": 16,
+      "interpolated": false,
+      "x": 960,
+      "y": 519
+    },
+    {
+      "conf": 0.7056,
+      "frame": 17,
+      "interpolated": false,
+      "x": 960,
+      "y": 516
+    },
+    {
+      "conf": 0.7391,
+      "frame": 18,
+      "interpolated": false,
+      "x": 961,
+      "y": 483
+    },
+    {
+      "conf": 0.4272,
+      "frame": 22,
+      "interpolated": false,
+      "x": 949,
+      "y": 382
+    }
+  ],
+  "video": {
+    "duration_sec": 1.6,
+    "filename": "red2.mp4",
+    "fps": 30.0,
+    "frame_count": 48,
+    "height": 1080,
+    "width": 1920
+  },
+  "warnings": []
+}

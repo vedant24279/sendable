@@ -1,0 +1,230 @@
+{
+  "ball_type": "red",
+  "calibration": {
+    "bat_L": [
+      814,
+      454
+    ],
+    "bat_R": [
+      1122,
+      458
+    ],
+    "bat_stump": [
+      967,
+      435
+    ],
+    "bowl_L": [
+      769,
+      764
+    ],
+    "bowl_R": [
+      1152,
+      764
+    ],
+    "bowl_stump": [
+      961,
+      785
+    ]
+  },
+  "events": {
+    "bounce": {
+      "frame": 21,
+      "grid_cell": [
+        59,
+        6
+      ],
+      "interpolated": false,
+      "length_m": 7.391,
+      "timestamp_sec": 0.7,
+      "x": 925,
+      "y": 537,
+      "zone": "GOOD"
+    },
+    "deviation": {
+      "frame": 27,
+      "timestamp_sec": 0.9,
+      "x": 938,
+      "y": 391
+    },
+    "impact": null,
+    "release": {
+      "frame": 10,
+      "timestamp_sec": 0.3333,
+      "x": 841,
+      "y": 463
+    }
+  },
+  "job_id": "607be851",
+  "outputs": {
+    "annotated_video_url": "output.mp4",
+    "csv_url": "detections_20260927_161722.csv",
+    "first_frame_url": "first_frame.jpg"
+  },
+  "schema_version": 1,
+  "segments": {
+    "seg_a_bounce_sec": 0.7,
+    "seg_a_deviation_sec": 0.9,
+    "seg_a_end_sec": 1.7333,
+    "seg_a_release_sec": 0.3333,
+    "seg_a_start_sec": 0.0,
+    "seg_b_bounce_sec": 2.8,
+    "seg_b_deviation_sec": 3.2,
+    "seg_b_end_sec": 3.6,
+    "seg_b_release_sec": 2.0667,
+    "seg_b_start_sec": 1.7333,
+    "seg_c_bd_end_sec": 4.7333,
+    "seg_c_end_sec": 5.7333,
+    "seg_c_rb_end_sec": 4.3333,
+    "seg_c_start_sec": 3.6
+  },
+  "stats": {
+    "detection_rate": 1.0,
+    "frames_interpolated": 0,
+    "frames_with_ball": 37,
+    "processing_time_sec": 72.79
+  },
+  "trajectory": [
+    {
+      "conf": 0.7477,
+      "frame": 10,
+      "interpolated": false,
+      "x": 841,
+      "y": 463
+    },
+    {
+      "conf": 0.3528,
+      "frame": 11,
+      "interpolated": false,
+      "x": 849,
+      "y": 464
+    },
+    {
+      "conf": 0.7453,
+      "frame": 12,
+      "interpolated": false,
+      "x": 860,
+      "y": 469
+    },
+    {
+      "conf": 0.7458,
+      "frame": 13,
+      "interpolated": false,
+      "x": 863,
+      "y": 470
+    },
+    {
+      "conf": 0.7318,
+      "frame": 14,
+      "interpolated": false,
+      "x": 870,
+      "y": 473
+    },
+    {
+      "conf": 0.7438,
+      "frame": 15,
+      "interpolated": false,
+      "x": 880,
+      "y": 479
+    },
+    {
+      "conf": 0.7719,
+      "frame": 16,
+      "interpolated": false,
+      "x": 889,
+      "y": 487
+    },
+    {
+      "conf": 0.6448,
+      "frame": 17,
+      "interpolated": false,
+      "x": 906,
+      "y": 506
+    },
+    {
+      "conf": 0.7509,
+      "frame": 18,
+      "interpolated": false,
+      "x": 911,
+      "y": 512
+    },
+    {
+      "conf": 0.7515,
+      "frame": 19,
+      "interpolated": false,
+      "x": 912,
+      "y": 512
+    },
+    {
+      "conf": 0.7219,
+      "frame": 20,
+      "interpolated": false,
+      "x": 917,
+      "y": 520
+    },
+    {
+      "conf": 0.7569,
+      "frame": 21,
+      "interpolated": false,
+      "x": 925,
+      "y": 531
+    },
+    {
+      "conf": 0.7614,
+      "frame": 22,
+      "interpolated": false,
+      "x": 936,
+      "y": 505
+    },
+    {
+      "conf": 0.3741,
+      "frame": 27,
+      "interpolated": false,
+      "x": 938,
+      "y": 391
+    },
+    {
+      "conf": 0.7318,
+      "frame": 28,
+      "interpolated": false,
+      "x": 919,
+      "y": 380
+    },
+    {
+      "conf": 0.5035,
+      "frame": 29,
+      "interpolated": false,
+      "x": 896,
+      "y": 375
+    },
+    {
+      "conf": 0.7159,
+      "frame": 30,
+      "interpolated": false,
+      "x": 872,
+      "y": 372
+    },
+    {
+      "conf": 0.7154,
+      "frame": 31,
+      "interpolated": false,
+      "x": 865,
+      "y": 372
+    },
+    {
+      "conf": 0.6564,
+      "frame": 32,
+      "interpolated": false,
+      "x": 850,
+      "y": 371
+    }
+  ],
+  "video": {
+    "duration_sec": 1.7333,
+    "filename": "red5.mp4",
+    "fps": 30.0,
+    "frame_count": 52,
+    "height": 1080,
+    "width": 1920
+  },
+  "warnings": []
+}
