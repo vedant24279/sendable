@@ -61,3 +61,43 @@ The endpoint `GET /api/clips/{id}/prefill` returns the system's detected events,
 - `events`: Contains `release`, `bounce`, `impact`, and `deviation`. Every event field is nullable (`null` if absent from results.json).
 - `trajectory`: Array of ball detection points with `frame` (int), `x` (float), `y` (float), `conf` (float, nullable), and `interpolated` (boolean).
 - `calibration`: Pitch landmarks normalised from results.json into an array of `{ "name": str, "x": float, "y": float }`.
+
+
+## 5. Viewer Architecture and Controls
+
+### 5.1 Viewport Transformation
+- **Coordinate System**: All overlays and annotations map to ORIGINAL video pixel coordinates `[0..width, 0..height]` (floats).
+- **Transformation Formula**:
+  - `screen.x = image.x * scale + offsetX`
+  - `screen.y = image.y * scale + offsetY`
+  - Inverted: `image.x = (screen.x - offsetX) / scale`, `image.y = (screen.y - offsetY) / scale`
+- **Scale Constraints**: Clamped to `[0.1, 16.0]`. When `scale >= 2.0`, canvas `imageSmoothingEnabled` is disabled for crisp nearest-neighbour inspection.
+- **Centering & Fitting**: `F` key fits the full delivery frame into the container maintaining aspect ratio; `G` resets zoom to 1:1 pixel scale (100%).
+- **Zooming**: Mouse wheel zooms centered exactly at the cursor point, keeping the image pixel under the cursor fixed.
+
+### 5.2 Frame Cache & Prefetching
+- **Decode Guarantee**: Backend decodes frames sequentially with OpenCV and serves JPEGs (quality 92).
+- **Client Cache**: Frontend maintains an LRU cache of up to 60 `ImageBitmap` instances per delivery clip.
+- **Strict Frame Display**: The viewer never displays a frame index other than the currently selected frame. If a frame is decoding/fetching, a clean loading placeholder is displayed.
+- **Prefetch Window**: Upon every frame step, background prefetching automatically loads frames `[n - 3 .. n + 10]`.
+- **Clip Switching**: Pending frame fetches are immediately aborted via `AbortController` when switching clips.
+
+### 5.3 Overlays
+- **Calibration Overlay**:
+  - Boundary polygon: `bowl_L -> bowl_R -> bat_R -> bat_L` closed path.
+  - Stumps: Labelled markers for `bat_stump` and `bowl_stump`.
+  - Always visible when toggled, unaffected by blind mode.
+- **Ghost Trajectory**:
+  - Solid dots for detected points, hollow dots for interpolated points.
+  - Current-frame detection is highlighted with a distinct outer ring.
+  - Gated by `ghostAllowed` (hidden in blind mode).
+- **Ghost Events**:
+  - Coloured pins for `Release`, `Bounce`, `Deviation`, and `Impact`.
+  - Pin visibility is configurable to show only the active frame event or all clip events.
+  - Gated by `ghostAllowed`.
+
+### 5.4 Navigation & Loupe
+- **8x Loupe Magnifier**: 160x160 px window at 8x magnification with center crosshair. Toggled via `L` or active while holding `Alt`.
+- **Timeline**: Visual tick track indicating detected vs. interpolated ball detections per frame, event markers, and interactive scrub handle.
+- **Playback**: Space bar toggles smooth 0.25x slow-motion playback.
+- **Reserved Keys**: Hotkeys `R`, `B`, `H`, `E`, `Z`, `Y`, and digits `1-4` are strictly reserved for subsequent annotation tools.
