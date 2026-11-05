@@ -44,8 +44,12 @@ export const Viewer = () => {
   const viewportRef = useRef<Viewport>(viewport);
   viewportRef.current = viewport;
 
+  // Track if user has manually adjusted zoom or pan
+  const hasManualAdjustmentRef = useRef<boolean>(false);
+
   // Fit view helper
   const handleFit = useCallback(() => {
+    hasManualAdjustmentRef.current = false;
     if (!clip) return;
     const { w, h } = viewDimensionsRef.current;
     if (w <= 0 || h <= 0) return;
@@ -55,6 +59,7 @@ export const Viewer = () => {
 
   // 100% zoom helper
   const handleActualSize = useCallback(() => {
+    hasManualAdjustmentRef.current = true;
     if (!clip) return;
     const { w, h } = viewDimensionsRef.current;
     setViewport({
@@ -348,13 +353,11 @@ export const Viewer = () => {
     updateStatusBar(isMouseOverRef.current ? mousePosRef.current : undefined);
   }, [draw, updateStatusBar]);
 
-  // ResizeObserver for canvas container
+  // ResizeObserver for canvas content area
   useEffect(() => {
     const container = containerRef.current;
     const canvas = canvasRef.current;
     if (!container || !canvas) return;
-
-    let initialFitDone = false;
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -369,10 +372,10 @@ export const Viewer = () => {
         canvas.style.width = `${width}px`;
         canvas.style.height = `${height}px`;
 
-        if (!initialFitDone && clip) {
+        // Re-fit on resize only if the user has not zoomed or panned manually
+        if (!hasManualAdjustmentRef.current && clip) {
           const fitted = fit(clip.width, clip.height, width, height);
           setViewport(fitted);
-          initialFitDone = true;
         }
 
         draw();
@@ -386,7 +389,8 @@ export const Viewer = () => {
 
   // Re-fit view when clip changes
   useEffect(() => {
-    if (clip && viewDimensionsRef.current.w > 0) {
+    hasManualAdjustmentRef.current = false;
+    if (clip && viewDimensionsRef.current.w > 0 && viewDimensionsRef.current.h > 0) {
       const fitted = fit(
         clip.width,
         clip.height,
@@ -402,6 +406,8 @@ export const Viewer = () => {
     e.preventDefault();
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    hasManualAdjustmentRef.current = true;
 
     const rect = canvas.getBoundingClientRect();
     const cursor: Point = {
@@ -445,6 +451,7 @@ export const Viewer = () => {
 
     // Pan handling
     if (isPanningRef.current) {
+      hasManualAdjustmentRef.current = true;
       const dx = e.clientX - panStartRef.current.x;
       const dy = e.clientY - panStartRef.current.y;
       setViewport({
@@ -503,18 +510,20 @@ export const Viewer = () => {
   }, [handleFit, handleActualSize]);
 
   return (
-    <div className="viewer-container" ref={containerRef}>
-      <canvas
-        ref={canvasRef}
-        className="viewer-canvas"
-        onContextMenu={(e) => e.preventDefault()}
-        onWheel={handleWheel}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-      />
+    <div className="viewer-container">
+      <div className="viewer-canvas-box" ref={containerRef}>
+        <canvas
+          ref={canvasRef}
+          className="viewer-canvas"
+          onContextMenu={(e) => e.preventDefault()}
+          onWheel={handleWheel}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        />
+      </div>
       <div className="viewer-status-bar" ref={statusRef}>
         Frame {currentFrame} / {clip ? clip.frame_count - 1 : 0} &bull; t = 0.000 s &bull; cursor (—, —) &bull; zoom 100%
       </div>

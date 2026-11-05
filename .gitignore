@@ -11,3 +11,4 @@ tools/annotator/.cache/
 tools/annotator/frontend/node_modules/
 tools/annotator/frontend/dist/
 tools/annotator/manifest.json
+tools/annotator/contact_sheets/

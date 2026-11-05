@@ -10,6 +10,13 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Ensure tools/annotator/backend is on sys.path
+_current_dir = Path(__file__).resolve().parent
+_backend_dir = _current_dir.parent
+if str(_backend_dir) not in sys.path:
+    sys.path.insert(0, str(_backend_dir))
+
 import cv2
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -380,3 +387,8 @@ async def save_label(clip_id: str, request: Request) -> Dict[str, Any]:
         af.write(json.dumps(audit_entry) + "\n")
 
     return {"status": "ok", "label": label_data}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host="127.0.0.1", port=8765, reload=True)

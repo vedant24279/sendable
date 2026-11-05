@@ -58,6 +58,52 @@ describe('viewport math', () => {
     expect(screenCentre.y).toBeCloseTo(viewH / 2, 4);
   });
 
+  it('fits 1920x1080 image into 1354x732 view: scale 0.6778 (+-0.001), fully inside view, offsetX ~26.5, offsetY 0', () => {
+    const imgW = 1920;
+    const imgH = 1080;
+    const viewW = 1354;
+    const viewH = 732;
+
+    const vp = fit(imgW, imgH, viewW, viewH);
+
+    // scale 0.6778 (+-0.001)
+    expect(vp.scale).toBeGreaterThanOrEqual(0.6778 - 0.001);
+    expect(vp.scale).toBeLessThanOrEqual(0.6778 + 0.001);
+
+    // offsetX ~26.5, offsetY 0
+    expect(vp.offsetX).toBeCloseTo(26.33, 1);
+    expect(vp.offsetY).toBe(0);
+
+    // image fully inside the view
+    const topLeft = imageToScreen({ x: 0, y: 0 }, vp);
+    const bottomRight = imageToScreen({ x: imgW, y: imgH }, vp);
+
+    expect(topLeft.x).toBeGreaterThanOrEqual(0);
+    expect(topLeft.y).toBeGreaterThanOrEqual(0);
+    expect(bottomRight.x).toBeLessThanOrEqual(viewW);
+    expect(bottomRight.y).toBeLessThanOrEqual(viewH);
+  });
+
+  it('fits 1920x1080 image into 2000x500 view (height-limited)', () => {
+    const imgW = 1920;
+    const imgH = 1080;
+    const viewW = 2000;
+    const viewH = 500;
+
+    const vp = fit(imgW, imgH, viewW, viewH);
+
+    // Height-limited: scale = 500 / 1080
+    expect(vp.scale).toBeCloseTo(500 / 1080, 4);
+    expect(vp.offsetY).toBe(0);
+    expect(vp.offsetX).toBeGreaterThan(0);
+
+    // Rendered height equals view height
+    const renderedH = imgH * vp.scale;
+    expect(renderedH).toBeCloseTo(viewH, 4);
+    const renderedW = imgW * vp.scale;
+    expect(renderedW).toBeLessThan(viewW);
+  });
+
   it('clamps scale between 0.1 and 16', () => {
     expect(clampScale(0.01)).toBe(0.1);
     expect(clampScale(0.1)).toBe(0.1);
