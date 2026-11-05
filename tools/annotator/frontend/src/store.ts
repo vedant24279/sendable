@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { ClipItem, PrefillData, fetchClips, fetchPrefill } from './api';
 import { Viewport } from './lib/viewport';
 import { frameCache } from './lib/frameCache';
+import { LabelStatus } from './lib/labelModel';
+import { ToolKind } from './lib/hotkeys';
 
 export interface OverlayToggles {
   ghostTrajectory: boolean;
@@ -19,11 +21,16 @@ export interface AnnotatorState {
   viewport: Viewport;
   overlays: OverlayToggles;
   ghostAllowed: boolean;
+  blindToggle: boolean;
   loupeEnabled: boolean;
   altHeld: boolean;
   loadingClips: boolean;
   loadingPrefill: boolean;
   error: string | null;
+  armedTool: ToolKind | null;
+  selectedPin: { kind: ToolKind } | null;
+  autoAdvance: boolean;
+  annotatorName: string;
 
   // Actions
   loadClips: (retries?: number) => Promise<void>;
@@ -34,8 +41,14 @@ export interface AnnotatorState {
   setViewport: (vp: Viewport | ((prev: Viewport) => Viewport)) => void;
   toggleOverlay: (key: keyof OverlayToggles) => void;
   setGhostAllowed: (allowed: boolean) => void;
+  setBlindToggle: (blind: boolean) => void;
   toggleLoupe: () => void;
   setAltHeld: (held: boolean) => void;
+  setArmedTool: (tool: ToolKind | null) => void;
+  setSelectedPin: (pin: { kind: ToolKind } | null) => void;
+  setAutoAdvance: (enabled: boolean) => void;
+  setAnnotatorName: (name: string) => void;
+  updateClipLabelStatus: (clipId: string, status: LabelStatus) => void;
   selectPrevClip: () => void;
   selectNextClip: () => void;
 }
@@ -54,11 +67,28 @@ export const useAnnotatorStore = create<AnnotatorState>((set, get) => ({
     calibration: true,
   },
   ghostAllowed: true, // Default true; later prompt uses it for blind mode
+  blindToggle: false,
   loupeEnabled: false,
   altHeld: false,
   loadingClips: false,
   loadingPrefill: false,
   error: null,
+  armedTool: null,
+  selectedPin: null,
+  autoAdvance: true,
+  annotatorName: 'vedant',
+
+  setArmedTool: (tool) => set({ armedTool: tool }),
+  setSelectedPin: (pin) => set({ selectedPin: pin }),
+  setBlindToggle: (blindToggle) => set({ blindToggle }),
+  setAutoAdvance: (autoAdvance) => set({ autoAdvance }),
+  setAnnotatorName: (annotatorName) => set({ annotatorName }),
+  updateClipLabelStatus: (clipId, status) =>
+    set((state) => ({
+      clips: state.clips.map((c) =>
+        c.clip_id === clipId ? { ...c, label_status: status } : c
+      ),
+    })),
 
   loadClips: async (retries = 5) => {
     set({ loadingClips: true, error: null });

@@ -1,13 +1,13 @@
 import { useCallback, useMemo, useRef } from 'react';
 import { useAnnotatorStore } from '../store';
+import { useLabelStore } from '../labelStore';
 import { frameToTime } from '../lib/viewport';
+import { computeGhostVisible } from '../lib/ghost';
 
 export const Timeline = () => {
-  const selectedClipId = useAnnotatorStore((s) => s.selectedClipId);
-  const clips = useAnnotatorStore((s) => s.clips);
-  const currentFrame = useAnnotatorStore((s) => s.currentFrame);
-  const setCurrentFrame = useAnnotatorStore((s) => s.setCurrentFrame);
-  const prefill = useAnnotatorStore((s) => s.prefill);
+  const annotatorState = useAnnotatorStore();
+  const { selectedClipId, clips, currentFrame, setCurrentFrame, prefill } = annotatorState;
+  const label = useLabelStore((s) => s.label);
 
   const clip = useMemo(() => clips.find((c) => c.clip_id === selectedClipId), [clips, selectedClipId]);
   const frameCount = clip ? clip.frame_count : 0;
@@ -64,6 +64,7 @@ export const Timeline = () => {
   }
 
   const events = prefill?.events;
+  const ghostVisible = computeGhostVisible(annotatorState);
 
   return (
     <div className="timeline-container">
@@ -95,41 +96,87 @@ export const Timeline = () => {
           })}
         </div>
 
-        {/* Event Markers */}
-        {events?.release && events.release.frame >= 0 && (
+        {/* System Ghost Event Markers (Only drawn when ghost is visible) */}
+        {ghostVisible && events?.release && events.release.frame >= 0 && (
           <div
-            className="event-marker marker-release"
+            className="event-marker ghost-marker marker-release"
             style={{ left: `${(events.release.frame / (frameCount - 1)) * 100}%` }}
-            title={`Release (frame ${events.release.frame})`}
+            title={`System Release (f:${events.release.frame})`}
+            onClick={(e) => { e.stopPropagation(); setCurrentFrame(events.release!.frame); }}
           >
             <span>R</span>
           </div>
         )}
-        {events?.bounce && events.bounce.frame >= 0 && (
+        {ghostVisible && events?.bounce && events.bounce.frame >= 0 && (
           <div
-            className="event-marker marker-bounce"
+            className="event-marker ghost-marker marker-bounce"
             style={{ left: `${(events.bounce.frame / (frameCount - 1)) * 100}%` }}
-            title={`Bounce (frame ${events.bounce.frame})`}
+            title={`System Bounce (f:${events.bounce.frame})`}
+            onClick={(e) => { e.stopPropagation(); setCurrentFrame(events.bounce!.frame); }}
           >
             <span>B</span>
           </div>
         )}
-        {events?.deviation && events.deviation.frame >= 0 && (
+        {ghostVisible && events?.deviation && events.deviation.frame >= 0 && (
           <div
-            className="event-marker marker-deviation"
+            className="event-marker ghost-marker marker-deviation"
             style={{ left: `${(events.deviation.frame / (frameCount - 1)) * 100}%` }}
-            title={`Deviation (frame ${events.deviation.frame})`}
+            title={`System Deviation (f:${events.deviation.frame})`}
+            onClick={(e) => { e.stopPropagation(); setCurrentFrame(events.deviation!.frame); }}
           >
             <span>D</span>
           </div>
         )}
-        {events?.impact && events.impact.frame != null && events.impact.frame >= 0 && (
+        {ghostVisible && events?.impact && events.impact.frame != null && events.impact.frame >= 0 && (
           <div
-            className="event-marker marker-impact"
+            className="event-marker ghost-marker marker-impact"
             style={{ left: `${(events.impact.frame / (frameCount - 1)) * 100}%` }}
-            title={`Impact (${events.impact.type || ''} frame ${events.impact.frame})`}
+            title={`System Impact (${events.impact.type || ''} f:${events.impact.frame})`}
+            onClick={(e) => { e.stopPropagation(); setCurrentFrame(events.impact!.frame!); }}
           >
-            <span>I</span>
+            <span>H</span>
+          </div>
+        )}
+
+        {/* User Label Event Markers (Always drawn) */}
+        {label?.release && label.release.frame >= 0 && (
+          <div
+            className="event-marker label-marker marker-release"
+            style={{ left: `${(label.release.frame / (frameCount - 1)) * 100}%` }}
+            title={`Label Release (f:${label.release.frame})`}
+            onClick={(e) => { e.stopPropagation(); setCurrentFrame(label.release!.frame); }}
+          >
+            <span>R</span>
+          </div>
+        )}
+        {label?.bounce && label.bounce.frame >= 0 && (
+          <div
+            className="event-marker label-marker marker-bounce"
+            style={{ left: `${(label.bounce.frame / (frameCount - 1)) * 100}%` }}
+            title={`Label Bounce (f:${label.bounce.frame})`}
+            onClick={(e) => { e.stopPropagation(); setCurrentFrame(label.bounce!.frame); }}
+          >
+            <span>B</span>
+          </div>
+        )}
+        {label?.impact && label.impact.frame != null && label.impact.frame >= 0 && (
+          <div
+            className="event-marker label-marker marker-impact"
+            style={{ left: `${(label.impact.frame / (frameCount - 1)) * 100}%` }}
+            title={`Label Impact (${label.impact.type} f:${label.impact.frame})`}
+            onClick={(e) => { e.stopPropagation(); setCurrentFrame(label.impact!.frame!); }}
+          >
+            <span>H</span>
+          </div>
+        )}
+        {label?.last_visible_frame != null && label.last_visible_frame >= 0 && (
+          <div
+            className="event-marker label-marker marker-end"
+            style={{ left: `${(label.last_visible_frame / (frameCount - 1)) * 100}%` }}
+            title={`Label Last Visible (f:${label.last_visible_frame})`}
+            onClick={(e) => { e.stopPropagation(); setCurrentFrame(label.last_visible_frame!); }}
+          >
+            <span>END</span>
           </div>
         )}
 

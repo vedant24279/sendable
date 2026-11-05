@@ -218,6 +218,7 @@ export const useLabelStore = create<LabelStoreState>((set, get) => ({
           dirty: false,
           saveState: 'saved',
         });
+        useAnnotatorStore.getState().updateClipLabelStatus(saved.clip_id, saved.status);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -274,6 +275,7 @@ export const useLabelStore = create<LabelStoreState>((set, get) => ({
           canUndo: historyStack.canUndo,
           canRedo: historyStack.canRedo,
         });
+        useAnnotatorStore.getState().updateClipLabelStatus(saved.clip_id, saved.status);
       }
       return true;
     } catch (err: unknown) {
@@ -346,6 +348,7 @@ export const useLabelStore = create<LabelStoreState>((set, get) => ({
           dirty: false,
           saveState: 'saved',
         });
+        useAnnotatorStore.getState().updateClipLabelStatus(saved.clip_id, saved.status);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

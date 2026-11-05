@@ -1,9 +1,11 @@
 import { useEffect } from 'react';
 import { useAnnotatorStore } from './store';
+import { useLabelStore } from './labelStore';
 import { useHotkeys } from './hooks/useHotkeys';
 import { ClipList } from './components/ClipList';
 import { Viewer } from './components/Viewer';
 import { Timeline } from './components/Timeline';
+import { LabelPanel } from './components/LabelPanel';
 
 export default function App() {
   const loadClips = useAnnotatorStore((s) => s.loadClips);
@@ -17,15 +19,52 @@ export default function App() {
   const toggleLoupe = useAnnotatorStore((s) => s.toggleLoupe);
   const playing = useAnnotatorStore((s) => s.playing);
   const togglePlaying = useAnnotatorStore((s) => s.togglePlaying);
+  const autoAdvance = useAnnotatorStore((s) => s.autoAdvance);
+  const setAutoAdvance = useAnnotatorStore((s) => s.setAutoAdvance);
+  const annotatorName = useAnnotatorStore((s) => s.annotatorName);
+  const setAnnotatorName = useAnnotatorStore((s) => s.setAnnotatorName);
 
   // Activate keyboard shortcuts
   useHotkeys();
 
+  // Read ?annotator= on mount (default: 'vedant')
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const annotatorParam = params.get('annotator');
+    if (annotatorParam && annotatorParam.trim()) {
+      setAnnotatorName(annotatorParam.trim());
+    }
+  }, [setAnnotatorName]);
+
+  // Load clips on mount
   useEffect(() => {
     void loadClips();
   }, [loadClips]);
 
+  // Load label whenever selected clip or annotator changes
+  useEffect(() => {
+    if (selectedClipId) {
+      void useLabelStore.getState().load(selectedClipId, annotatorName);
+    }
+  }, [selectedClipId, annotatorName]);
+
+  // Warn on tab/window close if dirty or currently saving
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      const { dirty, saveState } = useLabelStore.getState();
+      if (dirty || saveState === 'saving') {
+        e.preventDefault();
+        e.returnValue = 'You have unsaved changes. Leave anyway?';
+        return 'You have unsaved changes. Leave anyway?';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
   const clip = clips.find((c) => c.clip_id === selectedClipId);
+  const finalCount = clips.filter((c) => c.label_status === 'final').length;
+  const totalCount = clips.length;
 
   return (
     <div className="app-layout">
@@ -43,8 +82,22 @@ export default function App() {
                 ⚠️ Mismatch
               </span>
             )}
+            <span className="progress-counter" title="Finalized deliveries count">
+              Final: {finalCount} / {totalCount}
+            </span>
+            <span className="annotator-pill" title="Active annotator">
+              👤 {annotatorName}
+            </span>
           </div>
           <div className="toolbar-controls">
+            <label className="toolbar-checkbox" title="Automatically select the next non-final clip upon finalizing">
+              <input
+                type="checkbox"
+                checked={autoAdvance}
+                onChange={(e) => setAutoAdvance(e.target.checked)}
+              />
+              <span>Auto-advance after finalize</span>
+            </label>
             <button
               className={`toolbar-btn ${playing ? 'btn-active' : ''}`}
               onClick={togglePlaying}
@@ -73,6 +126,9 @@ export default function App() {
 
       {/* 3. Right: Info Panel & Overlays */}
       <aside className="info-pane">
+        {/* Label and Annotation Management */}
+        <LabelPanel />
+
         <div className="info-section">
           <h3 className="section-title">Delivery Info</h3>
           {clip ? (
@@ -179,18 +235,21 @@ export default function App() {
         </div>
 
         <div className="info-section shortcuts-section">
-          <h3 className="section-title">Navigation Shortcuts</h3>
+          <h3 className="section-title">Annotation Shortcuts</h3>
           <ul className="shortcuts-list">
-            <li><kbd>←</kbd> / <kbd>→</kbd> <span>&plusmn;1 Frame</span></li>
-            <li><kbd>Shift</kbd> + <kbd>←</kbd> / <kbd>→</kbd> <span>&plusmn;5 Frames</span></li>
-            <li><kbd>Home</kbd> / <kbd>End</kbd> <span>First / Last Frame</span></li>
-            <li><kbd>Space</kbd> <span>Play / Pause (0.25x)</span></li>
+            <li><kbd>R</kbd> / <kbd>B</kbd> / <kbd>H</kbd> <span>Arm Release / Bounce / Impact</span></li>
+            <li><kbd>E</kbd> <span>Set Last Visible Frame</span></li>
+            <li><kbd>1</kbd>–<kbd>4</kbd> <span>Impact: Bat, Pad, Stumps, None</span></li>
+            <li><kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Y</kbd> <span>Undo / Redo</span></li>
+            <li><kbd>Ctrl</kbd> + <kbd>S</kbd> <span>Save Draft</span></li>
+            <li><kbd>Ctrl</kbd> + <kbd>↵</kbd> <span>Finalize</span></li>
+            <li><kbd>Ctrl</kbd> + <kbd>Arrows</kbd> <span>Nudge Pin (&plusmn;1px, Shift: &plusmn;10px)</span></li>
+            <li><kbd>Esc</kbd> <span>Disarm Tool / Deselect Pin</span></li>
+            <li><kbd>←</kbd> / <kbd>→</kbd> <span>&plusmn;1 Frame (Shift: &plusmn;5)</span></li>
+            <li><kbd>Space</kbd> <span>Play / Pause</span></li>
             <li><kbd>[</kbd> / <kbd>]</kbd> <span>Previous / Next Clip</span></li>
-            <li><kbd>F</kbd> <span>Fit to Window</span></li>
-            <li><kbd>G</kbd> <span>100% Actual Size</span></li>
+            <li><kbd>F</kbd> / <kbd>G</kbd> <span>Fit to Window / 100% Size</span></li>
             <li><kbd>L</kbd> / hold <kbd>Alt</kbd> <span>8x Loupe Magnifier</span></li>
-            <li><kbd>Middle / Right Drag</kbd> <span>Pan Viewport</span></li>
-            <li><kbd>Scroll Wheel</kbd> <span>Zoom at Cursor</span></li>
           </ul>
         </div>
       </aside>

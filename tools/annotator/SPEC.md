@@ -151,3 +151,58 @@ Validates labels against `schema.py` constraints and clip dimension metadata, re
   - `flag`: updates status to `"flagged"` and appends note.
   - `reopen`: restores status from `"final"` to `"draft"`.
 
+
+## 7. Annotation UI
+
+### 7.1 Pure Helpers
+- **Ghost Visibility (`src/lib/ghost.ts`)**:
+  - `computeGhostVisible(s)` evaluates whether system predictions may be rendered or used to influence label state:
+    $$\text{ghostVisible} = s.\text{ghostAllowed} \land \neg s.\text{blindToggle} \land (s.\text{overlays.ghostTrajectory} \lor s.\text{overlays.ghostEvents})$$
+  - Store fields: `ghostAllowed` (boolean), `blindToggle` (boolean), `overlays.ghostTrajectory` and `overlays.ghostEvents` (booleans).
+- **Pin Projection & Hit Testing (`src/lib/pins.ts`)**:
+  - `pinsForFrame(label, frame, showAll)`: extracts key event pins (`release`, `bounce`, `impact`) either matching the active `frame` or all events when `showAll` is true.
+  - `hitTestPin(pins, imgX, imgY, scale, radiusScreenPx = 10)`: calculates screen-space Euclidean distance from cursor to pins, returning the closest pin within `radiusScreenPx`.
+- **Keyboard Action Router (`src/lib/hotkeys.ts`)**:
+  - `keyToAction(ev)` maps keyboard events to discrete domain actions (`armTool`, `disarmTool`, `setLastVisible`, `setImpactType`, `undo`, `redo`, `saveDraft`, `finalize`, `nudgePin`, `selectPin`).
+  - **Input Shield**: Ignores all single-key and modifier hotkeys when `targetTag` is `INPUT`, `TEXTAREA`, or `SELECT` to prevent interference while editing notes or metadata.
+
+### 7.2 Viewer Interaction & Canvas Rendering (`src/components/Viewer.tsx`)
+- **Tool Arming & Placement**:
+  - Keys `R`, `B`, `H` arm `release`, `bounce`, and `impact` placement tools respectively.
+  - While armed, canvas cursor switches to `crosshair` and status bar displays `"Tool: <tool> - click to place"`.
+  - Left-clicking the canvas places the event at the current frame using un-zoomed original image coordinates $(x, y)$ rounded to 1 decimal place, then automatically disarms the tool.
+  - Attempting to place `impact` without first selecting an impact type (or with type `none`) blocks placement and displays an inline warning banner: `"Choose impact type first (1-4)"`.
+- **Pin Selection, Dragging & Nudging**:
+  - When no tool is armed, clicking within 10 screen pixels of a pin selects it.
+  - Dragging a selected pin moves it across the image in real time; changes are committed as a single undoable history entry upon mouse-up.
+  - Clicking empty canvas space or pressing `Esc` deselects the pin.
+  - Arrow keys with `Ctrl` nudge the selected pin by $\pm 1$ image pixel ($\pm 10$ pixels when holding `Shift`).
+- **Canvas Rendering**:
+  - Color-coded pin markers: Release (orange `#f97316`, `R`), Bounce (pink `#ec4899`, `B`), Impact (red `#ef4444`, `H`).
+  - Active/selected pin is highlighted with an outer ring and renders a label badge showing its frame number and $(x, y)$ coordinates.
+- **Loupe Magnifier**:
+  - 8x nearest-neighbor magnification box rendered with center crosshair.
+  - Positioned at an up-right offset `(cursor.x + 28, cursor.y - 28 - size)` and automatically flips downward or leftward if overflowing viewport boundaries.
+
+### 7.3 Timeline Markers (`src/components/Timeline.tsx`)
+- Displays distinct circular markers for human-annotated events: Release (`R`), Bounce (`B`), and Impact (`H`).
+- Displays a prominent `END` badge on the timeline for `last_visible_frame`.
+- System ghost markers are rendered only when `computeGhostVisible` is true and styled with translucent, dashed borders.
+
+### 7.4 Control Panel (`src/components/LabelPanel.tsx`)
+- **Status & Mode**: Displays real-time save state (`Idle`, `Saving...`, `Saved`, `Save Failed`), delivery annotation mode (`MANUAL` or `ASSISTED`), and status pill (`draft`, `final`, `flagged`).
+- **Workflow Actions**:
+  - `Save Draft` (`Ctrl+S`): forces an immediate save of the current draft.
+  - `Finalize` (`Ctrl+Enter`): validates all requirements and transitions status to `final`.
+  - `Flag`: displays an inline reason input, transitions status to `flagged`, and appends the note.
+  - `Reopen Draft`: restores an already finalized delivery back to `draft`.
+  - `Adopt System Release+Bounce`: one-click adoption of system release and bounce coordinates; hidden when ghost visibility is disabled.
+- **Validation Issues List**: Lists blocking errors and non-blocking warnings with one-click jump to the relevant frame.
+- **Events Table**: Tabular view of Release, Bounce, Impact, and Last Visible frames and coordinates with `Go` (jump to frame) and `✕` (clear event) buttons.
+- **Metadata Fields**: Dropdowns and inputs for `split`, `ball_colour`, `batter_hand`, `bowler_type`, `lighting`, 1-4 impact buttons, conditional `lbw` dropdown (enabled for pad impact), flags checkboxes, and notes textarea.
+
+### 7.5 Top Bar, Safety & Progression
+- **Annotator Identification**: Reads annotator name from URL query parameter `?annotator=` (default: `vedant`).
+- **Progress Counter**: Tracks finalized deliveries: `Final: x / N`.
+- **Auto-Advance**: Checkbox (enabled by default) automatically selects the next non-final clip upon finalizing.
+- **Dirty Safety**: `window.beforeunload` listener alerts the user if attempting to leave or reload with unsaved modifications or while a save is in flight.

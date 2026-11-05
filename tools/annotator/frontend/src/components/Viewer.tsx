@@ -1,5 +1,7 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
+import type { FC } from 'react';
 import { useAnnotatorStore } from '../store';
+import { useLabelStore } from '../labelStore';
 import {
   screenToImage,
   imageToScreen,
@@ -10,24 +12,38 @@ import {
   Viewport,
 } from '../lib/viewport';
 import { frameCache } from '../lib/frameCache';
+import { computeGhostVisible } from '../lib/ghost';
+import { pinsForFrame, hitTestPin } from '../lib/pins';
+import { placeEvent, round1 } from '../lib/labelModel';
 
-export const Viewer = () => {
+export const Viewer: FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const statusRef = useRef<HTMLDivElement>(null);
 
-  const selectedClipId = useAnnotatorStore((s) => s.selectedClipId);
-  const clips = useAnnotatorStore((s) => s.clips);
-  const currentFrame = useAnnotatorStore((s) => s.currentFrame);
-  const prefill = useAnnotatorStore((s) => s.prefill);
-  const viewport = useAnnotatorStore((s) => s.viewport);
-  const setViewport = useAnnotatorStore((s) => s.setViewport);
-  const overlays = useAnnotatorStore((s) => s.overlays);
-  const ghostAllowed = useAnnotatorStore((s) => s.ghostAllowed);
-  const loupeEnabled = useAnnotatorStore((s) => s.loupeEnabled);
-  const altHeld = useAnnotatorStore((s) => s.altHeld);
+  const annotatorState = useAnnotatorStore();
+  const {
+    selectedClipId,
+    clips,
+    currentFrame,
+    prefill,
+    viewport,
+    setViewport,
+    overlays,
+    loupeEnabled,
+    altHeld,
+    armedTool,
+    setArmedTool,
+    selectedPin,
+    setSelectedPin,
+  } = annotatorState;
+
+  const { label, apply } = useLabelStore();
 
   const clip = clips.find((c) => c.clip_id === selectedClipId);
+
+  // Transient warning for impact without type
+  const [impactWarning, setImpactWarning] = useState<string | null>(null);
 
   // Mutable refs to prevent React re-renders on mouse movement
   const mousePosRef = useRef<Point>({ x: 0, y: 0 });
@@ -39,6 +55,10 @@ export const Viewer = () => {
     ox: 0,
     oy: 0,
   });
+
+  // Pin drag handling refs
+  const isDraggingPinRef = useRef<boolean>(false);
+  const dragCurrentImgPosRef = useRef<{ x: number; y: number } | null>(null);
 
   const viewDimensionsRef = useRef<{ w: number; h: number }>({ w: 800, h: 600 });
   const viewportRef = useRef<Viewport>(viewport);
@@ -73,6 +93,12 @@ export const Viewer = () => {
   const updateStatusBar = useCallback(
     (cursorScreen?: Point) => {
       if (!statusRef.current || !clip) return;
+
+      if (armedTool) {
+        statusRef.current.textContent = `Tool: ${armedTool} - click to place`;
+        return;
+      }
+
       const vp = viewportRef.current;
       const t = frameToTime(currentFrame, clip.fps).toFixed(3);
       const zoomPct = (vp.scale * 100).toFixed(0);
@@ -85,7 +111,7 @@ export const Viewer = () => {
 
       statusRef.current.textContent = `Frame ${currentFrame} / ${clip.frame_count - 1}   t = ${t} s   ${cursorStr}   zoom ${zoomPct}%`;
     },
-    [clip, currentFrame]
+    [clip, currentFrame, armedTool]
   );
 
   // Main canvas drawing function
@@ -125,7 +151,7 @@ export const Viewer = () => {
       ctx.drawImage(bitmap, destX, destY, destW, destH);
     }
 
-    // 3. Calibration Overlay (always shown if toggled, independent of ghostAllowed)
+    // 3. Calibration Overlay
     if (overlays.calibration && prefill?.calibration) {
       const calibMap = new Map<string, Point>();
       prefill.calibration.forEach((pt) => calibMap.set(pt.name, { x: pt.x, y: pt.y }));
@@ -156,7 +182,6 @@ export const Viewer = () => {
         ctx.fill();
       }
 
-      // Stump points
       ['bat_stump', 'bowl_stump'].forEach((stumpName) => {
         const pt = calibMap.get(stumpName);
         if (pt) {
@@ -177,11 +202,12 @@ export const Viewer = () => {
       });
     }
 
-    // 4. Ghost Trajectory Overlay (only if ghostAllowed)
-    if (ghostAllowed && overlays.ghostTrajectory && prefill?.trajectory) {
+    const ghostVisible = computeGhostVisible(annotatorState);
+
+    // 4. Ghost Trajectory Overlay (only if ghostVisible)
+    if (ghostVisible && overlays.ghostTrajectory && prefill?.trajectory) {
       const traj = prefill.trajectory;
 
-      // Draw faint trajectory line
       if (traj.length > 1) {
         ctx.beginPath();
         const first = imageToScreen(traj[0], vp);
@@ -195,13 +221,11 @@ export const Viewer = () => {
         ctx.stroke();
       }
 
-      // Draw dots
       traj.forEach((pt) => {
         const sPt = imageToScreen(pt, vp);
         const isCurrent = pt.frame === currentFrame;
 
         if (isCurrent) {
-          // Highlight current frame point
           ctx.beginPath();
           ctx.arc(sPt.x, sPt.y, 7, 0, Math.PI * 2);
           ctx.strokeStyle = '#facc15';
@@ -216,12 +240,10 @@ export const Viewer = () => {
           ctx.beginPath();
           ctx.arc(sPt.x, sPt.y, 3, 0, Math.PI * 2);
           if (pt.interpolated) {
-            // Hollow dot for interpolated points
             ctx.strokeStyle = '#38bdf8';
             ctx.lineWidth = 1.5;
             ctx.stroke();
           } else {
-            // Solid dot for detected points
             ctx.fillStyle = '#38bdf8';
             ctx.fill();
           }
@@ -229,8 +251,8 @@ export const Viewer = () => {
       });
     }
 
-    // 5. Ghost Events Overlay (only if ghostAllowed)
-    if (ghostAllowed && overlays.ghostEvents && prefill?.events) {
+    // 5. Ghost Events Overlay (only if ghostVisible)
+    if (ghostVisible && overlays.ghostEvents && prefill?.events) {
       const evs = prefill.events;
       const eventList: Array<{ name: string; pt: Point; frame: number; color: string }> = [];
 
@@ -267,12 +289,68 @@ export const Viewer = () => {
           ctx.font = 'bold 11px system-ui, sans-serif';
           ctx.fillStyle = ev.color;
           ctx.textAlign = 'left';
-          ctx.fillText(`${ev.name} [f:${ev.frame}]`, sPt.x + 8, sPt.y + 4);
+          ctx.fillText(`Ghost ${ev.name} [f:${ev.frame}]`, sPt.x + 8, sPt.y + 4);
         }
       });
     }
 
-    // 6. Loupe Magnifier (Alt held or toggled with L)
+    // 6. Label Annotation Pins (Release, Bounce, Impact)
+    const pins = pinsForFrame(label, currentFrame, overlays.showAllEvents);
+    pins.forEach((pin) => {
+      // If currently dragging this pin, use drag position preview
+      const isCurrentlyDragged =
+        isDraggingPinRef.current &&
+        selectedPin?.kind === pin.kind &&
+        dragCurrentImgPosRef.current != null;
+
+      const px = isCurrentlyDragged ? dragCurrentImgPosRef.current!.x : pin.x;
+      const py = isCurrentlyDragged ? dragCurrentImgPosRef.current!.y : pin.y;
+
+      const sPt = imageToScreen({ x: px, y: py }, vp);
+      const isSelected = selectedPin?.kind === pin.kind;
+
+      const color =
+        pin.kind === 'release' ? '#f97316' : pin.kind === 'bounce' ? '#ec4899' : '#ef4444';
+      const letter = pin.kind === 'release' ? 'R' : pin.kind === 'bounce' ? 'B' : 'H';
+
+      // Selection ring
+      if (isSelected) {
+        ctx.beginPath();
+        ctx.arc(sPt.x, sPt.y, 11, 0, Math.PI * 2);
+        ctx.strokeStyle = '#facc15';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+
+      // Pin circle
+      ctx.beginPath();
+      ctx.arc(sPt.x, sPt.y, 7, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Letter inside pin
+      ctx.font = 'bold 9px system-ui, sans-serif';
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(letter, sPt.x, sPt.y);
+
+      // Pin text label (frame & rounded coordinates)
+      ctx.font = 'bold 11px system-ui, sans-serif';
+      ctx.fillStyle = color;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(
+        `${letter} [f:${pin.frame}, (${px.toFixed(1)}, ${py.toFixed(1)})]`,
+        sPt.x + 12,
+        sPt.y
+      );
+    });
+
+    // 7. Loupe Magnifier (Offset up-right: cursor + (28, -28 - size), flipped when leaving canvas)
     const isLoupeActive = (loupeEnabled || altHeld) && isMouseOverRef.current && bitmap;
     if (isLoupeActive && bitmap) {
       const cursor = mousePosRef.current;
@@ -291,9 +369,21 @@ export const Viewer = () => {
         const sx = imgCursor.x - srcSize / 2;
         const sy = imgCursor.y - srcSize / 2;
 
-        // Position loupe centered at cursor (clamped within view)
-        const dx = Math.max(8, Math.min(viewW - loupeSize - 8, cursor.x - loupeSize / 2));
-        const dy = Math.max(8, Math.min(viewH - loupeSize - 8, cursor.y - loupeSize / 2));
+        // Default position: offset up-right by (28, -28 - loupeSize)
+        let dx = cursor.x + 28;
+        let dy = cursor.y - 28 - loupeSize;
+
+        // Flip to opposite side if it would leave the canvas
+        if (dy < 8) {
+          dy = cursor.y + 28; // flip below
+        }
+        if (dx + loupeSize > viewW - 8) {
+          dx = cursor.x - 28 - loupeSize; // flip left
+        }
+
+        // Clamp to stay inside canvas view
+        dx = Math.max(8, Math.min(viewW - loupeSize - 8, dx));
+        dy = Math.max(8, Math.min(viewH - loupeSize - 8, dy));
 
         ctx.save();
         ctx.beginPath();
@@ -333,10 +423,12 @@ export const Viewer = () => {
     clip,
     currentFrame,
     overlays,
-    ghostAllowed,
     loupeEnabled,
     altHeld,
     prefill,
+    annotatorState,
+    label,
+    selectedPin,
   ]);
 
   // Subscribe to frameCache updates to re-render when image is loaded
@@ -372,7 +464,6 @@ export const Viewer = () => {
         canvas.style.width = `${width}px`;
         canvas.style.height = `${height}px`;
 
-        // Re-fit on resize only if the user has not zoomed or panned manually
         if (!hasManualAdjustmentRef.current && clip) {
           const fitted = fit(clip.width, clip.height, width, height);
           setViewport(fitted);
@@ -421,9 +512,59 @@ export const Viewer = () => {
     updateStatusBar(cursor);
   };
 
-  // Mouse pan listeners (Middle or Right mouse)
+  // Mouse pan & click & drag listeners
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Only Middle (1) or Right (2) button pans; Left (0) is reserved
+    const canvas = canvasRef.current;
+    if (!canvas || !clip) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const cursor: Point = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    };
+    const imgPt = screenToImage(cursor, viewportRef.current);
+
+    // Left button (0): Tool placement OR Pin Selection / Dragging
+    if (e.button === 0) {
+      if (armedTool) {
+        // Impact requires an impact type first
+        if (
+          armedTool === 'impact' &&
+          (!label?.impact || !label.impact.type || label.impact.type === 'none')
+        ) {
+          setImpactWarning('Choose impact type first (1-4)');
+          return;
+        }
+
+        const clampedX = round1(Math.max(0, Math.min(clip.width, imgPt.x)));
+        const clampedY = round1(Math.max(0, Math.min(clip.height, imgPt.y)));
+        const ghostVis = computeGhostVisible(useAnnotatorStore.getState());
+
+        apply((prev) =>
+          placeEvent(prev, armedTool, currentFrame, clampedX, clampedY, { ghostVisible: ghostVis })
+        );
+
+        setArmedTool(null);
+        setSelectedPin(null);
+        setImpactWarning(null);
+        return;
+      }
+
+      // Tool not armed: hit-test pins on current frame
+      const pins = pinsForFrame(label, currentFrame, overlays.showAllEvents);
+      const hit = hitTestPin(pins, imgPt.x, imgPt.y, viewportRef.current.scale, 12);
+
+      if (hit) {
+        setSelectedPin({ kind: hit.kind });
+        isDraggingPinRef.current = true;
+        dragCurrentImgPosRef.current = { x: hit.x, y: hit.y };
+      } else {
+        setSelectedPin(null);
+      }
+      return;
+    }
+
+    // Middle (1) or Right (2) button pans
     if (e.button === 1 || e.button === 2) {
       e.preventDefault();
       isPanningRef.current = true;
@@ -438,7 +579,7 @@ export const Viewer = () => {
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !clip) return;
 
     const rect = canvas.getBoundingClientRect();
     const cursor: Point = {
@@ -448,6 +589,17 @@ export const Viewer = () => {
 
     mousePosRef.current = cursor;
     isMouseOverRef.current = true;
+
+    // Pin dragging
+    if (isDraggingPinRef.current && selectedPin) {
+      const imgPt = screenToImage(cursor, viewportRef.current);
+      const clampedX = round1(Math.max(0, Math.min(clip.width, imgPt.x)));
+      const clampedY = round1(Math.max(0, Math.min(clip.height, imgPt.y)));
+      dragCurrentImgPosRef.current = { x: clampedX, y: clampedY };
+      draw();
+      updateStatusBar(cursor);
+      return;
+    }
 
     // Pan handling
     if (isPanningRef.current) {
@@ -466,11 +618,23 @@ export const Viewer = () => {
       draw();
     }
 
-    // Direct DOM update for status bar without React re-renders
     updateStatusBar(cursor);
   };
 
   const handleMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Left mouse up finishes pin drag
+    if (e.button === 0 && isDraggingPinRef.current && selectedPin) {
+      isDraggingPinRef.current = false;
+      if (dragCurrentImgPosRef.current) {
+        const { x: nx, y: ny } = dragCurrentImgPosRef.current;
+        dragCurrentImgPosRef.current = null;
+        const ghostVis = computeGhostVisible(useAnnotatorStore.getState());
+        apply((prev) => placeEvent(prev, selectedPin.kind, currentFrame, nx, ny, { ghostVisible: ghostVis }));
+      }
+      return;
+    }
+
+    // Middle or Right mouse up finishes pan
     if (e.button === 1 || e.button === 2) {
       isPanningRef.current = false;
     }
@@ -483,6 +647,13 @@ export const Viewer = () => {
   const handleMouseLeave = () => {
     isMouseOverRef.current = false;
     isPanningRef.current = false;
+    if (isDraggingPinRef.current && selectedPin && dragCurrentImgPosRef.current) {
+      isDraggingPinRef.current = false;
+      const { x: nx, y: ny } = dragCurrentImgPosRef.current;
+      dragCurrentImgPosRef.current = null;
+      const ghostVis = computeGhostVisible(useAnnotatorStore.getState());
+      apply((prev) => placeEvent(prev, selectedPin.kind, currentFrame, nx, ny, { ghostVisible: ghostVis }));
+    }
     draw();
     updateStatusBar();
   };
@@ -514,7 +685,7 @@ export const Viewer = () => {
       <div className="viewer-canvas-box" ref={containerRef}>
         <canvas
           ref={canvasRef}
-          className="viewer-canvas"
+          className={`viewer-canvas ${armedTool ? 'cursor-armed' : ''}`}
           onContextMenu={(e) => e.preventDefault()}
           onWheel={handleWheel}
           onMouseDown={handleMouseDown}
@@ -523,6 +694,18 @@ export const Viewer = () => {
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         />
+        {impactWarning && (
+          <div className="viewer-toast-warning">
+            <span>⚠️ {impactWarning}</span>
+            <button
+              type="button"
+              className="toast-close-btn"
+              onClick={() => setImpactWarning(null)}
+            >
+              ✕
+            </button>
+          </div>
+        )}
       </div>
       <div className="viewer-status-bar" ref={statusRef}>
         Frame {currentFrame} / {clip ? clip.frame_count - 1 : 0} &bull; t = 0.000 s &bull; cursor (—, —) &bull; zoom 100%

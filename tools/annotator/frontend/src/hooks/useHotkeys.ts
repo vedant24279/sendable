@@ -1,6 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { useAnnotatorStore } from '../store';
+import { useLabelStore } from '../labelStore';
 import { frameCache } from '../lib/frameCache';
+import { keyToAction } from '../lib/hotkeys';
+import { computeGhostVisible } from '../lib/ghost';
+import { placeEvent, setImpactType, setLastVisible, round1 } from '../lib/labelModel';
 
 export function useHotkeys(): void {
   const selectedClipId = useAnnotatorStore((s) => s.selectedClipId);
@@ -14,6 +18,8 @@ export function useHotkeys(): void {
   const setAltHeld = useAnnotatorStore((s) => s.setAltHeld);
   const selectPrevClip = useAnnotatorStore((s) => s.selectPrevClip);
   const selectNextClip = useAnnotatorStore((s) => s.selectNextClip);
+  const setArmedTool = useAnnotatorStore((s) => s.setArmedTool);
+  const setSelectedPin = useAnnotatorStore((s) => s.setSelectedPin);
 
   const clip = clips.find((c) => c.clip_id === selectedClipId);
   const frameCount = clip ? clip.frame_count : 0;
@@ -31,6 +37,80 @@ export function useHotkeys(): void {
   // 1. Keyboard event listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const targetTag = (e.target as HTMLElement)?.tagName;
+
+      // 1. Check annotation actions via keyToAction helper
+      const action = keyToAction({
+        key: e.key,
+        code: e.code,
+        ctrlKey: e.ctrlKey,
+        shiftKey: e.shiftKey,
+        altKey: e.altKey,
+        targetTag,
+      });
+
+      if (action) {
+        e.preventDefault();
+        const aStore = useAnnotatorStore.getState();
+        const lStore = useLabelStore.getState();
+        const gv = computeGhostVisible(aStore);
+
+        switch (action.type) {
+          case 'armTool':
+            setArmedTool(action.tool);
+            break;
+          case 'disarm':
+            setArmedTool(null);
+            setSelectedPin(null);
+            break;
+          case 'setLastVisible':
+            lStore.apply((prev) => setLastVisible(prev, currentFrameRef.current, { ghostVisible: gv }));
+            break;
+          case 'setImpactType':
+            lStore.apply((prev) => setImpactType(prev, action.impactType, { ghostVisible: gv }));
+            break;
+          case 'undo':
+            lStore.undo();
+            break;
+          case 'redo':
+            lStore.redo();
+            break;
+          case 'saveDraft':
+            void lStore.saveDraft();
+            break;
+          case 'finalize':
+            void (async () => {
+              const ok = await lStore.finalize();
+              if (ok && useAnnotatorStore.getState().autoAdvance) {
+                const { clips: allClips, selectedClipId: currId, selectClip } = useAnnotatorStore.getState();
+                const currIdx = allClips.findIndex((c) => c.clip_id === currId);
+                for (let i = 1; i < allClips.length; i++) {
+                  const nextIdx = (currIdx + i) % allClips.length;
+                  if (allClips[nextIdx].label_status !== 'final') {
+                    void selectClip(allClips[nextIdx].clip_id);
+                    break;
+                  }
+                }
+              }
+            })();
+            break;
+          case 'nudge': {
+            const pin = aStore.selectedPin;
+            if (pin && lStore.label) {
+              const pt = lStore.label[pin.kind];
+              const f = pt?.frame;
+              if (pt && typeof f === 'number' && pt.x != null && pt.y != null) {
+                const nx = round1(pt.x + action.dx);
+                const ny = round1(pt.y + action.dy);
+                lStore.apply((prev) => placeEvent(prev, pin.kind, f, nx, ny, { ghostVisible: gv }));
+              }
+            }
+            break;
+          }
+        }
+        return;
+      }
+
       // Ignore if user is typing in an input or select
       if (
         e.target instanceof HTMLInputElement ||
@@ -127,6 +207,8 @@ export function useHotkeys(): void {
     setAltHeld,
     selectPrevClip,
     selectNextClip,
+    setArmedTool,
+    setSelectedPin,
   ]);
 
   // 2. Playback loop at 0.25x speed
