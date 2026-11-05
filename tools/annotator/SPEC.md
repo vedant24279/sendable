@@ -101,3 +101,53 @@ The endpoint `GET /api/clips/{id}/prefill` returns the system's detected events,
 - **Timeline**: Visual tick track indicating detected vs. interpolated ball detections per frame, event markers, and interactive scrub handle.
 - **Playback**: Space bar toggles smooth 0.25x slow-motion playback.
 - **Reserved Keys**: Hotkeys `R`, `B`, `H`, `E`, `Z`, `Y`, and digits `1-4` are strictly reserved for subsequent annotation tools.
+
+## 6. Label Logic
+
+### 6.1 State Model & Pure Operations (`src/lib/labelModel.ts`)
+- **Schema Alignment**: Types directly match `tools/annotator/backend/app/schema.py` (`schema_version=1`, `clip_id`, `split`, `annotator`, `mode`, `status`, `created_at`, `updated_at`, `ball_colour`, `batter_hand`, `bowler_type`, `lighting`, `release`, `bounce`, `impact`, `last_visible_frame`, `lbw`, `flags`, `notes`).
+- **Precision**: Original pixel coordinates $(x, y)$ are rounded to 1 decimal place. Frame numbers are rounded to integers.
+- **Preconditions & Constraints**:
+  - Placing impact coordinates requires an existing non-none impact type (`bat`, `pad`, `stumps`). Placing without a type or with type `none` throws a descriptive `Error`.
+  - Setting impact type to `none` forces impact `frame`, `x`, and `y` to `null`.
+  - Switching impact type away from `pad` resets `lbw` to `null`.
+- **Mode Tracking**:
+  - Newly initialized labels start in `blind` mode.
+  - Any edit made while `ghostVisible` is `true` escalates mode to `assisted` permanently.
+- **System Event Adoption**:
+  - `adoptSystemEvents` copies system-detected `release` and `bounce` only; `impact` remains untouched.
+  - Mode is set to `assisted`.
+
+### 6.2 Validation Rules (`src/lib/validate.ts`)
+Validates labels against `schema.py` constraints and clip dimension metadata, returning an array of `{ path, message, severity: "error" | "warning" }`.
+- **Strict Errors**:
+  - `schema_version` must equal 1.
+  - When `impact.type === 'none'`, coordinates must all be null.
+  - `lbw` may only be set when `impact.type === 'pad'`.
+  - Ordering: `release.frame < bounce.frame`, `bounce.frame <= impact.frame`, `impact.frame <= last_visible_frame`, `release.frame <= last_visible_frame`.
+  - Bounds: frames must be integers $\in [0, \text{frame\_count} - 1]$; $(x, y)$ coordinates must be within $[0, \text{width}] \times [0, \text{height}]$.
+  - Status `final` requirements: `annotator` (non-empty), `release`, `bounce`, `impact` (including coordinates when not `none`), `last_visible_frame`, `ball_colour`, and `batter_hand` must be filled.
+- **Non-blocking Warnings**:
+  - `release.frame > 20`: unusually late release.
+  - `bounce.frame - release.frame <= 3`: rapid bounce within 3 frames of release.
+  - `last_visible_frame < bounce.frame`: last visible frame positioned prior to bounce.
+
+### 6.3 History Management (`src/lib/history.ts`)
+- Generic `HistoryStack<T>` managing linear undo/redo history.
+- Capped at 200 entries to bound memory consumption; evicts oldest past states on overflow.
+- Branching actions clear the future redo stack.
+
+### 6.4 Store & Autosave (`src/labelStore.ts`)
+- **State**: `{ label, savedLabel, dirty, saveState, saveError, issues, canUndo, canRedo }`.
+- **Autosave Engine**:
+  - 1500 ms debounced autosave runs exclusively when status is `draft`.
+  - Monotonic revision counter ensures in-flight network saves never overwrite newer local modifications.
+  - Switching delivery clips immediately flushes any pending draft autosave before loading the next clip.
+  - Save errors transition `saveState` to `"error"` while preserving `dirty: true`.
+- **Lifecycle Actions**:
+  - `load`: fetches remote label or creates `emptyLabel`, resets history stack.
+  - `apply`: pushes to history, recomputes validation issues, marks dirty, and schedules autosave.
+  - `finalize`: runs validation for `final`; halts without network call if any error issues exist; warnings do not block submission.
+  - `flag`: updates status to `"flagged"` and appends note.
+  - `reopen`: restores status from `"final"` to `"draft"`.
+

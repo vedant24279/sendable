@@ -78,39 +78,20 @@ export interface PrefillData {
   calibration: CalibrationPoint[];
 }
 
-export interface LabelPoint {
-  frame: number;
-  x: number;
-  y: number;
-}
+import type { Label } from './lib/labelModel';
 
-export interface LabelImpactPoint {
-  type: "bat" | "pad" | "stumps" | "none";
-  frame?: number | null;
-  x?: number | null;
-  y?: number | null;
-}
+export type LabelData = Label;
 
-export interface LabelData {
-  schema_version: number;
-  clip_id: string;
-  split: "dev" | "final" | null;
-  annotator: string;
-  mode: "assisted" | "blind";
-  status: "draft" | "final" | "flagged";
-  created_at: string;
-  updated_at: string;
-  ball_colour: "white" | "red" | "pink" | null;
-  batter_hand: "right" | "left" | null;
-  bowler_type: "pace" | "spin" | null;
-  lighting: "bright" | "overcast" | "low" | null;
-  release: LabelPoint | null;
-  bounce: LabelPoint | null;
-  impact: LabelImpactPoint | null;
-  last_visible_frame: number | null;
-  lbw: "out" | "not_out_pitched_leg" | "not_out_impact_outside" | "not_out_missing" | "umpires_call" | null;
-  flags: Array<"ball_not_visible" | "camera_moved" | "bad_calibration" | "unclear">;
-  notes: string;
+export class ApiValidationError extends Error {
+  readonly issues: string[];
+  readonly detail: unknown;
+
+  constructor(message: string, issues: string[], detail?: unknown) {
+    super(message);
+    this.name = 'ApiValidationError';
+    this.issues = issues;
+    this.detail = detail;
+  }
 }
 
 export async function fetchClips(): Promise<ClipItem[]> {
@@ -132,15 +113,68 @@ export async function fetchPrefill(clipId: string): Promise<PrefillData | null> 
   return res.json() as Promise<PrefillData>;
 }
 
-export async function fetchLabel(clipId: string): Promise<LabelData | null> {
+export async function getLabel(clipId: string): Promise<Label | null> {
   const res = await fetch(`/api/clips/${encodeURIComponent(clipId)}/label`);
   if (res.status === 404) {
     return null;
   }
   if (!res.ok) {
-    throw new Error(`Failed to fetch label: HTTP ${res.status}`);
+    throw new Error(`Failed to get label: HTTP ${res.status}`);
   }
-  return res.json() as Promise<LabelData>;
+  return res.json() as Promise<Label>;
+}
+
+export const fetchLabel = getLabel;
+
+export async function putLabel(clipId: string, label: Label): Promise<Label> {
+  const res = await fetch(`/api/clips/${encodeURIComponent(clipId)}/label`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(label),
+  });
+
+  if (res.status === 422) {
+    let detailMsg = 'Validation Error';
+    let issues: string[] = [];
+    let errData: unknown = null;
+    try {
+      errData = await res.json();
+      if (errData && typeof errData === 'object' && 'detail' in errData) {
+        const detail = (errData as { detail: unknown }).detail;
+        if (Array.isArray(detail)) {
+          issues = detail.map((d: any) => {
+            if (typeof d === 'string') return d;
+            if (d && typeof d === 'object') {
+              const loc = Array.isArray(d.loc) ? d.loc.filter((x: any) => x !== 'body').join('.') : '';
+              const prefix = loc ? `${loc}: ` : '';
+              return `${prefix}${d.msg || JSON.stringify(d)}`;
+            }
+            return String(d);
+          });
+          detailMsg = issues.join('; ');
+        } else if (typeof detail === 'string') {
+          issues = [detail];
+          detailMsg = detail;
+        } else {
+          issues = [JSON.stringify(detail)];
+          detailMsg = issues[0];
+        }
+      }
+    } catch {
+      issues = [res.statusText || 'HTTP 422 Unprocessable Entity'];
+      detailMsg = issues[0];
+    }
+    throw new ApiValidationError(detailMsg, issues, errData);
+  }
+
+  if (!res.ok) {
+    throw new Error(`Failed to save label: HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+  return (data.label ?? data) as Label;
 }
 
 export function frameUrl(clipId: string, n: number): string {
