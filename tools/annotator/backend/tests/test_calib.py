@@ -11,6 +11,7 @@ from app.calib import (
     pitch_grid_segments,
     classify_source,
     validate_calibration_geometry,
+    compute_stump_world_errors,
 )
 from app.calib_constants import CALIB_WARN_PX, WORLD_CALIB_POINTS
 
@@ -51,6 +52,16 @@ def test_golden_fixture_parity(golden_fixture):
         px, py = world_to_pixel(res.H, wX, wZ)
         assert abs(px - item["expected_pixel"][0]) < 1e-3
         assert abs(py - item["expected_pixel"][1]) < 1e-3
+
+
+def test_golden_fixture_stump_world_errors(golden_fixture):
+    pts = golden_fixture["points"]
+    errors = compute_stump_world_errors(pts)
+
+    assert abs(errors["dz_bat"] - 0.832) < 0.001
+    assert abs(errors["dz_bowl"] - (-0.453)) < 0.001
+    assert abs(errors["dx_bat"] - 0.061) < 0.002
+    assert abs(errors["dx_bowl"] - (-0.016)) < 0.002
 
 
 def test_nudge_bat_stump_by_6px():

@@ -163,6 +163,34 @@ def world_to_pixel(
     return float(x), float(y)
 
 
+def compute_stump_world_errors(
+    points: Dict[str, Sequence[float]],
+    H: Optional[np.ndarray] = None,
+) -> Dict[str, float]:
+    """
+    Map the CLICKED bat_stump and bowl_stump pixels to pitch metres with pixel_to_world
+    and compute signed errors against the expected world points:
+      bat_stump (0.0, 0.0)    -> dx_bat = x - 0, dz_bat = z - 0
+      bowl_stump (0.0, 20.12) -> dx_bowl = x - 0, dz_bowl = z - 20.12
+    """
+    if H is None:
+        fit_res = fit_homography(points)
+        H = fit_res.H
+
+    clicked_bat = points["bat_stump"]
+    clicked_bowl = points["bowl_stump"]
+
+    x_bat, z_bat = pixel_to_world(H, float(clicked_bat[0]), float(clicked_bat[1]))
+    x_bowl, z_bowl = pixel_to_world(H, float(clicked_bowl[0]), float(clicked_bowl[1]))
+
+    return {
+        "dx_bat": x_bat - 0.0,
+        "dz_bat": z_bat - 0.0,
+        "dx_bowl": x_bowl - 0.0,
+        "dz_bowl": z_bowl - 20.12,
+    }
+
+
 def pitch_grid_segments(
     H: np.ndarray,
     spacing_m: float = 1.0,
