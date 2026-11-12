@@ -6,6 +6,8 @@
 export interface ClipItem {
   clip_id: string;
   path: string;
+  display_name?: string;
+  pool?: 'library' | 'debug';
   fps: number;
   frame_count: number;
   width: number;
@@ -19,6 +21,10 @@ export interface ClipItem {
   split: "dev" | "final" | null;
   frame_count_mismatch?: boolean;
   has_error?: boolean;
+  added_at?: string;
+  last_opened_at?: string | null;
+  warnings?: string[];
+  size_bytes?: number;
 }
 
 export interface EventRelease {
@@ -181,4 +187,109 @@ export async function putLabel(clipId: string, label: Label): Promise<Label> {
 
 export function frameUrl(clipId: string, n: number): string {
   return `/api/clips/${encodeURIComponent(clipId)}/frame/${n}`;
+}
+
+export interface LibraryInfo {
+  folder: string;
+  count: number;
+}
+
+export async function fetchLibraryInfo(): Promise<LibraryInfo> {
+  const res = await fetch('/api/library/info');
+  if (!res.ok) {
+    throw new Error(`Failed to fetch library info: HTTP ${res.status}`);
+  }
+  return res.json() as Promise<LibraryInfo>;
+}
+
+export async function fetchLibraryRecents(limit = 20): Promise<ClipItem[]> {
+  const res = await fetch(`/api/library/recents?limit=${limit}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch recents: HTTP ${res.status}`);
+  }
+  return res.json() as Promise<ClipItem[]>;
+}
+
+export async function fetchLibraryAll(): Promise<ClipItem[]> {
+  const res = await fetch('/api/library');
+  if (!res.ok) {
+    throw new Error(`Failed to fetch library clips: HTTP ${res.status}`);
+  }
+  return res.json() as Promise<ClipItem[]>;
+}
+
+export async function markClipOpened(clipId: string): Promise<void> {
+  try {
+    await fetch(`/api/library/${encodeURIComponent(clipId)}/opened`, {
+      method: 'POST',
+    });
+  } catch (err) {
+    console.warn(`Failed to mark clip ${clipId} opened:`, err);
+  }
+}
+
+export async function hideClip(clipId: string): Promise<void> {
+  const res = await fetch(`/api/library/${encodeURIComponent(clipId)}/hide`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to hide clip: HTTP ${res.status}`);
+  }
+}
+
+export interface UploadResult {
+  status: 'added' | 'duplicate';
+  entry: ClipItem;
+}
+
+/**
+ * Uploads a video file as raw body stream using XMLHttpRequest for progress reporting.
+ */
+export function uploadVideoFile(
+  file: File,
+  onProgress?: (percent: number) => void
+): Promise<UploadResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const url = `/api/library/upload?name=${encodeURIComponent(file.name)}`;
+    xhr.open('POST', url, true);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+
+    if (xhr.upload && onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && e.total > 0) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          onProgress(pct);
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText) as UploadResult;
+          resolve(data);
+        } catch (err) {
+          reject(new Error('Invalid JSON response from server'));
+        }
+      } else {
+        let msg = `HTTP ${xhr.status} ${xhr.statusText}`;
+        try {
+          const errData = JSON.parse(xhr.responseText);
+          if (errData && errData.detail) {
+            msg = typeof errData.detail === 'string' ? errData.detail : JSON.stringify(errData.detail);
+          }
+        } catch {
+          // Keep status text
+        }
+        reject(new Error(msg));
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(new Error('Network error during video upload'));
+    };
+
+    xhr.send(file);
+  });
 }

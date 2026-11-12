@@ -1,16 +1,42 @@
 import { create } from 'zustand';
-import { ClipItem, PrefillData, fetchClips, fetchPrefill } from './api';
+import {
+  ClipItem,
+  PrefillData,
+  fetchClips,
+  fetchPrefill,
+  fetchLibraryInfo,
+  markClipOpened,
+  hideClip,
+  uploadVideoFile,
+} from './api';
 import { Viewport } from './lib/viewport';
 import { frameCache } from './lib/frameCache';
 import { LabelStatus } from './lib/labelModel';
 import { ToolKind } from './lib/hotkeys';
 import { CalibrationPointName } from './lib/calibConstants';
+import { filterAllowedVideoFile } from './lib/libraryUtils';
 
 export interface OverlayToggles {
   ghostTrajectory: boolean;
   ghostEvents: boolean;
   showAllEvents: boolean;
   calibration: boolean;
+}
+
+export interface UploadResultItem {
+  name: string;
+  status: 'added' | 'duplicate' | 'error';
+  message: string;
+}
+
+export interface UploadState {
+  uploading: boolean;
+  currentIdx: number;
+  total: number;
+  currentFile: string;
+  progressPct: number;
+  results: UploadResultItem[];
+  showResultsModal: boolean;
 }
 
 export interface AnnotatorState {
@@ -35,6 +61,13 @@ export interface AnnotatorState {
   calibrationMode: boolean;
   selectedCalibPoint: CalibrationPointName | null;
   loupeMag: 8 | 16;
+  libraryFolder: string;
+  libraryCount: number;
+  activeTab: 'recents' | 'library' | 'debug';
+  showAllRecents: boolean;
+  filePickerTrigger: number;
+  isDraggingFiles: boolean;
+  uploadState: UploadState;
 
   // Actions
   loadClips: (retries?: number) => Promise<void>;
@@ -60,6 +93,13 @@ export interface AnnotatorState {
   setCalibrationMode: (enabled: boolean) => void;
   setSelectedCalibPoint: (point: CalibrationPointName | null) => void;
   cycleCalibLoupe: () => void;
+  setActiveTab: (tab: 'recents' | 'library' | 'debug') => void;
+  setShowAllRecents: (showAll: boolean) => void;
+  hideClipAction: (clipId: string) => Promise<void>;
+  triggerOpenFilePicker: () => void;
+  setIsDraggingFiles: (isDragging: boolean) => void;
+  uploadFiles: (files: File[]) => Promise<void>;
+  dismissUploadModal: () => void;
 }
 
 export const useAnnotatorStore = create<AnnotatorState>((set, get) => ({
@@ -89,7 +129,31 @@ export const useAnnotatorStore = create<AnnotatorState>((set, get) => ({
   calibrationMode: false,
   selectedCalibPoint: 'bat_L',
   loupeMag: 8,
+  libraryFolder: '',
+  libraryCount: 0,
+  activeTab: 'recents',
+  showAllRecents: false,
+  filePickerTrigger: 0,
+  isDraggingFiles: false,
+  uploadState: {
+    uploading: false,
+    currentIdx: 0,
+    total: 0,
+    currentFile: '',
+    progressPct: 0,
+    results: [],
+    showResultsModal: false,
+  },
 
+  setActiveTab: (activeTab) => set({ activeTab }),
+  setShowAllRecents: (showAllRecents) => set({ showAllRecents }),
+  setIsDraggingFiles: (isDraggingFiles) => set({ isDraggingFiles }),
+  dismissUploadModal: () =>
+    set((state) => ({
+      uploadState: { ...state.uploadState, showResultsModal: false },
+    })),
+  triggerOpenFilePicker: () =>
+    set((state) => ({ filePickerTrigger: state.filePickerTrigger + 1 })),
   setArmedTool: (tool) => set({ armedTool: tool }),
   setSelectedPin: (pin) => set({ selectedPin: pin }),
   setBlindToggle: (blindToggle) => set({ blindToggle }),
@@ -147,8 +211,17 @@ export const useAnnotatorStore = create<AnnotatorState>((set, get) => ({
   loadClips: async (retries = 5) => {
     set({ loadingClips: true, error: null });
     try {
-      const clips = await fetchClips();
-      set({ clips, loadingClips: false, error: null });
+      const [clips, libInfo] = await Promise.all([
+        fetchClips(),
+        fetchLibraryInfo().catch(() => ({ folder: '', count: 0 })),
+      ]);
+      set({
+        clips,
+        libraryFolder: libInfo.folder,
+        libraryCount: libInfo.count,
+        loadingClips: false,
+        error: null,
+      });
       // Automatically select first clip if none selected
       const currentSelected = get().selectedClipId;
       if (!currentSelected && clips.length > 0) {
@@ -167,18 +240,45 @@ export const useAnnotatorStore = create<AnnotatorState>((set, get) => ({
     }
   },
 
+  hideClipAction: async (clipId: string) => {
+    try {
+      await hideClip(clipId);
+      set((state) => ({
+        clips: state.clips.filter((c) => c.clip_id !== clipId),
+      }));
+      const { selectedClipId, clips, selectClip } = get();
+      if (selectedClipId === clipId) {
+        const remaining = clips.filter((c) => c.clip_id !== clipId);
+        if (remaining.length > 0) {
+          void selectClip(remaining[0].clip_id);
+        } else {
+          set({ selectedClipId: null, prefill: null });
+        }
+      }
+    } catch (err) {
+      console.error(`Failed to hide clip ${clipId}:`, err);
+    }
+  },
+
   selectClip: async (clipId: string) => {
     const { clips, selectedClipId } = get();
     if (selectedClipId === clipId) return;
 
+    // Mark opened on backend
+    void markClipOpened(clipId);
+
+    const nowIso = new Date().toISOString();
     frameCache.setClip(clipId);
-    set({
+    set((state) => ({
       selectedClipId: clipId,
       currentFrame: 0,
       playing: false,
       prefill: null,
       loadingPrefill: true,
-    });
+      clips: state.clips.map((c) =>
+        c.clip_id === clipId ? { ...c, last_opened_at: nowIso } : c
+      ),
+    }));
 
     const clip = clips.find((c) => c.clip_id === clipId);
     if (clip) {
@@ -252,5 +352,98 @@ export const useAnnotatorStore = create<AnnotatorState>((set, get) => ({
     const currentIndex = clips.findIndex((c) => c.clip_id === selectedClipId);
     const nextIndex = currentIndex >= clips.length - 1 ? 0 : currentIndex + 1;
     void selectClip(clips[nextIndex].clip_id);
+  },
+
+  uploadFiles: async (files: File[]) => {
+    if (files.length === 0) return;
+
+    set({
+      uploadState: {
+        uploading: true,
+        currentIdx: 0,
+        total: files.length,
+        currentFile: files[0].name,
+        progressPct: 0,
+        results: [],
+        showResultsModal: true,
+      },
+    });
+
+    let firstClipId: string | null = null;
+    const results: UploadResultItem[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      set((state) => ({
+        uploadState: {
+          ...state.uploadState,
+          currentIdx: i + 1,
+          currentFile: file.name,
+          progressPct: 0,
+        },
+      }));
+
+      if (!filterAllowedVideoFile(file.name)) {
+        results.push({
+          name: file.name,
+          status: 'error',
+          message: 'Unsupported video extension (allowed: mp4, mov, mkv, avi, m4v, webm)',
+        });
+        set((state) => ({
+          uploadState: {
+            ...state.uploadState,
+            results: [...results],
+          },
+        }));
+        continue;
+      }
+
+      try {
+        const res = await uploadVideoFile(file, (pct) => {
+          set((state) => ({
+            uploadState: {
+              ...state.uploadState,
+              progressPct: pct,
+            },
+          }));
+        });
+
+        if (res.status === 'added') {
+          results.push({ name: file.name, status: 'added', message: 'Added' });
+        } else {
+          results.push({ name: file.name, status: 'duplicate', message: 'Already in library' });
+        }
+
+        if (!firstClipId && res.entry?.clip_id) {
+          firstClipId = res.entry.clip_id;
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        results.push({ name: file.name, status: 'error', message: msg });
+      }
+
+      set((state) => ({
+        uploadState: {
+          ...state.uploadState,
+          results: [...results],
+        },
+      }));
+    }
+
+    set((state) => ({
+      uploadState: {
+        ...state.uploadState,
+        uploading: false,
+      },
+      activeTab: 'recents',
+    }));
+
+    // Refresh clips and recents
+    await get().loadClips();
+
+    // When all uploads finish, open the first added or duplicate clip and refresh Recents
+    if (firstClipId) {
+      void get().selectClip(firstClipId);
+    }
   },
 }));

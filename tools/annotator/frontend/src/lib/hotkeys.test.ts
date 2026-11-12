@@ -9,6 +9,15 @@ describe('keyToAction', () => {
     expect(keyToAction({ key: 's', ctrlKey: true, targetTag: 'input' })).toBeNull();
     expect(keyToAction({ key: 'c', targetTag: 'INPUT' })).toBeNull();
     expect(keyToAction({ key: 'C', targetTag: 'TEXTAREA' })).toBeNull();
+    expect(keyToAction({ key: 'o', targetTag: 'INPUT' })).toBeNull();
+    expect(keyToAction({ key: 'O', targetTag: 'TEXTAREA' })).toBeNull();
+  });
+
+  it('maps O to openFilePicker', () => {
+    expect(keyToAction({ key: 'o' })).toEqual({ type: 'openFilePicker' });
+    expect(keyToAction({ key: 'O' })).toEqual({ type: 'openFilePicker' });
+    expect(keyToAction({ key: 'o', ctrlKey: true })).toBeNull();
+    expect(keyToAction({ key: 'o', altKey: true })).toBeNull();
   });
 
   it('maps C to toggleCalibrationMode', () => {

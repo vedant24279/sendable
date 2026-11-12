@@ -24,6 +24,15 @@ from pydantic import ValidationError
 
 from app.schema import Label, validate_label
 from app.calib import fit_homography
+from app.library import (
+    get_library_dir,
+    process_video_upload,
+    get_library_recents,
+    get_all_library_entries,
+    touch_library_clip_opened,
+    hide_library_clip,
+    find_library_clip_video,
+)
 
 
 def get_repo_root() -> Path:
@@ -100,11 +109,71 @@ def startup_event() -> None:
     load_manifest()
 
 
-def get_clip_entry(clip_id: str) -> Optional[Dict[str, Any]]:
+def resolve_clip(clip_id: str) -> Optional[Tuple[Path, Dict[str, Any]]]:
+    """
+    Resolve video file path and clip metadata for a clip_id from either the
+    user library or the debug/job manifest.
+    """
+    # 1. Check user library first
+    lib_match = find_library_clip_video(clip_id)
+    if lib_match is not None:
+        video_path, entry = lib_match
+        status, split = get_current_label_state(clip_id)
+        has_gt = False
+        label_file = get_labels_dir() / f"{clip_id}.json"
+        if label_file.is_file():
+            try:
+                with open(label_file, "r", encoding="utf-8") as lf:
+                    has_gt = bool(json.load(lf).get("calibration_gt"))
+            except Exception:
+                pass
+
+        meta: Dict[str, Any] = {
+            "clip_id": entry["clip_id"],
+            "display_name": entry.get("display_name", clip_id),
+            "pool": "library",
+            "fps": entry["fps"],
+            "frame_count": entry["frame_count"],
+            "width": entry["width"],
+            "height": entry["height"],
+            "warnings": entry.get("warnings", []),
+            "added_at": entry.get("added_at"),
+            "last_opened_at": entry.get("last_opened_at"),
+            "size_bytes": entry.get("size_bytes"),
+            "ball_type": None,
+            "has_results": False,
+            "has_calibration": False,
+            "system_residual_px": None,
+            "has_gt_calibration": has_gt,
+            "label_status": status,
+            "split": split,
+            "path": str(video_path),
+        }
+        return video_path, meta
+
+    # 2. Check manifest for job / debug clips
     manifest = load_manifest()
     for item in manifest:
         if item.get("clip_id") == clip_id:
-            return item
+            rel_path = item["path"]
+            video_path = REPO_ROOT / rel_path
+            status, split = get_current_label_state(clip_id)
+            meta = dict(item)
+            meta["pool"] = "debug"
+            if "display_name" not in meta:
+                meta["display_name"] = clip_id
+            meta["label_status"] = status
+            if split is not None:
+                meta["split"] = split
+            return video_path, meta
+
+    return None
+
+
+def get_clip_entry(clip_id: str) -> Optional[Dict[str, Any]]:
+    resolved = resolve_clip(clip_id)
+    if resolved is not None:
+        return resolved[1]
     return None
 
 
@@ -169,28 +238,159 @@ def health() -> Dict[str, str]:
 
 @app.get("/api/clips")
 def list_clips() -> List[Dict[str, Any]]:
-    manifest = load_manifest()
     result: List[Dict[str, Any]] = []
+
+    # 1. Library clips (pool "library")
+    lib_entries = get_all_library_entries()
+    labels_dir = get_labels_dir()
+    for entry in lib_entries:
+        clip_id = entry["clip_id"]
+        status, split = get_current_label_state(clip_id)
+        has_gt = False
+        label_file = labels_dir / f"{clip_id}.json"
+        if label_file.is_file():
+            try:
+                with open(label_file, "r", encoding="utf-8") as lf:
+                    has_gt = bool(json.load(lf).get("calibration_gt"))
+            except Exception:
+                pass
+
+        result.append(
+            {
+                "clip_id": clip_id,
+                "display_name": entry.get("display_name", clip_id),
+                "pool": "library",
+                "fps": entry["fps"],
+                "frame_count": entry["frame_count"],
+                "width": entry["width"],
+                "height": entry["height"],
+                "warnings": entry.get("warnings", []),
+                "added_at": entry.get("added_at"),
+                "last_opened_at": entry.get("last_opened_at"),
+                "size_bytes": entry.get("size_bytes"),
+                "ball_type": None,
+                "has_results": False,
+                "has_calibration": False,
+                "system_residual_px": None,
+                "has_gt_calibration": has_gt,
+                "label_status": status,
+                "split": split,
+            }
+        )
+
+    # 2. Debug clips from manifest (pool "debug")
+    manifest = load_manifest()
     for item in manifest:
         clip_copy = dict(item)
         clip_id = clip_copy["clip_id"]
-        # Reflect live status and split from configured labels directory
         status, split = get_current_label_state(clip_id)
+        clip_copy["pool"] = "debug"
+        if "display_name" not in clip_copy:
+            clip_copy["display_name"] = clip_id
         clip_copy["label_status"] = status
         if split is not None:
             clip_copy["split"] = split
         result.append(clip_copy)
+
     return result
+
+
+@app.post("/api/library/upload")
+async def upload_library_video(request: Request, name: str = "") -> Dict[str, Any]:
+    if not name or not name.strip():
+        raise HTTPException(status_code=400, detail="Missing 'name' query parameter")
+
+    status, entry = await process_video_upload(request.stream(), name.strip())
+    return {"status": status, "entry": entry}
+
+
+@app.get("/api/library/recents")
+def list_library_recents(limit: int = 20) -> List[Dict[str, Any]]:
+    entries = get_library_recents(limit=limit)
+    result: List[Dict[str, Any]] = []
+    labels_dir = get_labels_dir()
+
+    for e in entries:
+        e_copy = dict(e)
+        clip_id = e["clip_id"]
+        status, split = get_current_label_state(clip_id)
+        e_copy["label_status"] = status
+        if split is not None:
+            e_copy["split"] = split
+        has_gt = False
+        label_file = labels_dir / f"{clip_id}.json"
+        if label_file.is_file():
+            try:
+                with open(label_file, "r", encoding="utf-8") as lf:
+                    has_gt = bool(json.load(lf).get("calibration_gt"))
+            except Exception:
+                pass
+        e_copy["has_gt_calibration"] = has_gt
+        result.append(e_copy)
+
+    return result
+
+
+@app.get("/api/library")
+def list_library_all() -> List[Dict[str, Any]]:
+    entries = get_all_library_entries()
+    result: List[Dict[str, Any]] = []
+    labels_dir = get_labels_dir()
+
+    for e in entries:
+        e_copy = dict(e)
+        clip_id = e["clip_id"]
+        status, split = get_current_label_state(clip_id)
+        e_copy["label_status"] = status
+        if split is not None:
+            e_copy["split"] = split
+        has_gt = False
+        label_file = labels_dir / f"{clip_id}.json"
+        if label_file.is_file():
+            try:
+                with open(label_file, "r", encoding="utf-8") as lf:
+                    has_gt = bool(json.load(lf).get("calibration_gt"))
+            except Exception:
+                pass
+        e_copy["has_gt_calibration"] = has_gt
+        result.append(e_copy)
+
+    return result
+
+
+@app.get("/api/library/info")
+def get_library_info() -> Dict[str, Any]:
+    folder = get_library_dir()
+    entries = get_all_library_entries()
+    return {
+        "folder": str(folder),
+        "count": len(entries),
+    }
+
+
+@app.post("/api/library/{clip_id}/opened")
+def open_library_clip(clip_id: str) -> Dict[str, Any]:
+    entry = touch_library_clip_opened(clip_id)
+    if not entry:
+        return {"status": "ok"}
+    return {"status": "ok", "entry": entry}
+
+
+@app.post("/api/library/{clip_id}/hide")
+def hide_clip(clip_id: str) -> Dict[str, Any]:
+    ok = hide_library_clip(clip_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Clip not found in library: {clip_id}")
+    return {"status": "ok"}
 
 
 @app.get("/api/clips/{clip_id}/frame/{n}")
 def get_frame(clip_id: str, n: int) -> Response:
-    clip = get_clip_entry(clip_id)
-    if not clip:
+    resolved = resolve_clip(clip_id)
+    if not resolved:
         raise HTTPException(status_code=404, detail=f"Clip not found: {clip_id}")
 
-    rel_path = clip["path"]
-    video_path = REPO_ROOT / rel_path
+    video_path, clip = resolved
     if not video_path.is_file():
         raise HTTPException(
             status_code=404, detail=f"Video file missing for clip: {clip_id}"
@@ -224,18 +424,32 @@ def get_frame(clip_id: str, n: int) -> Response:
 
 @app.get("/api/clips/{clip_id}/prefill")
 def get_prefill(clip_id: str) -> Dict[str, Any]:
-    clip = get_clip_entry(clip_id)
-    if not clip:
+    resolved = resolve_clip(clip_id)
+    if not resolved:
         raise HTTPException(status_code=404, detail=f"Clip not found: {clip_id}")
 
-    video_path = REPO_ROOT / clip["path"]
+    video_path, clip = resolved
+    # For library clips or clips without results.json: prefill returns empty events, empty trajectory, calibration null
+    empty_prefill = {
+        "clip_id": clip_id,
+        "events": {
+            "release": None,
+            "bounce": None,
+            "impact": None,
+            "deviation": None,
+        },
+        "trajectory": [],
+        "calibration": None,
+    }
+
+    if clip.get("pool") == "library":
+        return empty_prefill
+
     job_dir = video_path.parent
     results_json = job_dir / "results.json"
 
     if not results_json.is_file():
-        raise HTTPException(
-            status_code=404, detail=f"No results.json for clip: {clip_id}"
-        )
+        return empty_prefill
 
     with open(results_json, "r", encoding="utf-8") as f:
         res = json.load(f)

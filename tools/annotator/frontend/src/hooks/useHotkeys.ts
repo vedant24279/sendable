@@ -63,6 +63,9 @@ export function useHotkeys(): void {
         const gv = computeGhostVisible(aStore);
 
         switch (action.type) {
+          case 'openFilePicker':
+            aStore.triggerOpenFilePicker();
+            break;
           case 'toggleCalibrationMode':
             aStore.toggleCalibrationMode();
             break;

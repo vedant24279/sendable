@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAnnotatorStore } from './store';
 import { useLabelStore } from './labelStore';
 import { useHotkeys } from './hooks/useHotkeys';
@@ -26,6 +26,8 @@ export default function App() {
   const calibrationMode = useAnnotatorStore((s) => s.calibrationMode);
   const toggleCalibrationMode = useAnnotatorStore((s) => s.toggleCalibrationMode);
   const loupeMag = useAnnotatorStore((s) => s.loupeMag);
+  const uploadFiles = useAnnotatorStore((s) => s.uploadFiles);
+  const [viewerDragOver, setViewerDragOver] = useState(false);
 
   // Activate keyboard shortcuts
   useHotkeys();
@@ -129,7 +131,38 @@ export default function App() {
           </div>
         </header>
 
-        <section className="viewer-wrapper">
+        <section
+          className={`viewer-wrapper ${viewerDragOver ? 'drag-over-active' : ''}`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!viewerDragOver) setViewerDragOver(true);
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setViewerDragOver(false);
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setViewerDragOver(false);
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+              const files = Array.from(e.dataTransfer.files);
+              void uploadFiles(files);
+            }
+          }}
+        >
+          {viewerDragOver && (
+            <div className="drop-target-overlay">
+              <div className="drop-target-content">
+                <span className="drop-icon">📥</span>
+                <span className="drop-text">Drop videos to add</span>
+              </div>
+            </div>
+          )}
           <Viewer />
         </section>
 

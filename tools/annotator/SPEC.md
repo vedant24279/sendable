@@ -354,3 +354,53 @@ To eliminate false-positive calibration error blocks while retaining high-precis
 - **Accept system calibration**: Copies the 4 system corners and derives both stumps with `stump_confirmed = { bat_stump: false, bowl_stump: false }`.
 - **Reset to system**: Copies all six system points with both stumps unconfirmed (`stump_confirmed = { bat_stump: false, bowl_stump: false }`).
 - **Source Classification**: Compares **only the 4 corner points** against system points. Moving or deriving stump points does not alter the source classification between `system_verified` and `system_adjusted`.
+
+## 11. In-App Video Library & Recents
+
+Replaces the single static folder model with an in-app, user-managed video library residing outside the repository.
+
+### 11.1 Directory Structure & Storage
+- **Root Directory**: Configured via `ANNOTATOR_LIBRARY_DIR` environment variable; defaults to `<home>/CricketAnnotator/library` (`Path.home() / "CricketAnnotator" / "library"`). Never stored inside the git repository.
+- **Videos Subdirectory**: `videos/<clip_id><ext>` storing renamed files. Client filenames are never used as on-disk paths.
+- **Whitelisted Video Extensions**: `.mp4`, `.mov`, `.mkv`, `.avi`, `.m4v`, `.webm`.
+- **Catalog File**: `library.json` using atomic temporary file replacement on save.
+
+### 11.2 Catalog Entry Schema
+```json
+{
+  "clip_id": "c_a1b2c3d4",
+  "display_name": "match_delivery_01.mp4",
+  "sha256": "a1b2c3d4e5...",
+  "size_bytes": 1048576,
+  "added_at": "ISO-8601 string",
+  "last_opened_at": "ISO-8601 string",
+  "hidden": false,
+  "fps": 30.0,
+  "frame_count": 92,
+  "width": 1920,
+  "height": 1080,
+  "warnings": []
+}
+```
+- **Clip ID**: Formatted as `"c_" + sha256[:8]`. If the 8-character prefix collides with an existing clip with a different hash, uses 12 hex characters (`"c_" + sha256[:12]`).
+- **Warnings**:
+  - `low_fps`: `fps < 25`
+  - `low_res`: `height < 720`
+  - `short`: `frame_count < 20`
+  - `long`: `frame_count > 300`
+
+### 11.3 Upload & Ingestion
+- `POST /api/library/upload?name=<filename>`: Streams raw binary body (no multipart form dependency).
+- **Size Limits**: Enforces `ANNOTATOR_MAX_UPLOAD_MB` (default 2048 MB); returns HTTP 413 if exceeded.
+- **Validation**: Rejects unsupported extensions (HTTP 415) and empty bodies (HTTP 400).
+- **Deduplication**: If `sha256` already exists in `library.json`, cleans up upload temp file, un-hides the entry (`hidden = false`), updates `last_opened_at`, and returns `{ "status": "duplicate", "entry": ... }`.
+- **Integrity**: Decodes sequentially with OpenCV. If 0 frames or corrupt, deletes the video file and returns HTTP 422 with zero leftover files.
+
+### 11.4 Endpoints
+- `GET /api/library/recents?limit=20`: Returns non-hidden entries sorted by `last_opened_at desc` (fallback `added_at desc`), joined with `label_status`.
+- `GET /api/library`: Returns all non-hidden entries joined with `label_status`.
+- `GET /api/library/info`: Returns `{ "folder": str, "count": int }`.
+- `POST /api/library/{clip_id}/opened`: Updates `last_opened_at` timestamp.
+- `POST /api/library/{clip_id}/hide`: Flags `hidden = true` (video and label persist on disk).
+- `GET /api/clips`: Aggregates library clips (`pool: "library"`) and debug manifest clips (`pool: "debug"`).
+- `GET /api/clips/{clip_id}/prefill`: Returns empty events, empty trajectory, and `calibration: null` for library clips.
