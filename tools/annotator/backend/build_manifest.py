@@ -15,6 +15,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import cv2
 
+backend_dir = Path(__file__).resolve().parent
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
+
+from app.calib import fit_homography
+
 
 def find_repo_root() -> Path:
     """Locate the root of the repository containing backend/ and tools/."""
@@ -94,6 +100,7 @@ def build_manifest_data(
 
         ball_type: Optional[str] = None
         has_calibration = False
+        system_residual_px: Optional[float] = None
         res_frame_count: Optional[int] = None
 
         if has_results:
@@ -101,7 +108,14 @@ def build_manifest_data(
                 with open(results_json, "r", encoding="utf-8") as rf:
                     res_data = json.load(rf)
                     ball_type = res_data.get("ball_type")
-                    has_calibration = bool(res_data.get("calibration"))
+                    calib_dict = res_data.get("calibration")
+                    has_calibration = bool(calib_dict)
+                    if has_calibration and isinstance(calib_dict, dict):
+                        try:
+                            fit_res = fit_homography(calib_dict)
+                            system_residual_px = round(float(fit_res.residual_px), 4)
+                        except Exception:
+                            pass
                     res_video = res_data.get("video", {})
                     res_frame_count = res_video.get("frame_count")
             except Exception as e:
@@ -119,12 +133,14 @@ def build_manifest_data(
         label_file = eval_labels_dir / f"{clip_id}.json"
         label_status = "none"
         split = None
+        has_gt_calibration = False
         if label_file.is_file():
             try:
                 with open(label_file, "r", encoding="utf-8") as lf:
                     ldata = json.load(lf)
                     label_status = ldata.get("status", "draft")
                     split = ldata.get("split")
+                    has_gt_calibration = bool(ldata.get("calibration_gt"))
             except Exception:
                 pass
 
@@ -143,6 +159,8 @@ def build_manifest_data(
             "ball_type": ball_type,
             "has_results": has_results,
             "has_calibration": has_calibration,
+            "system_residual_px": system_residual_px,
+            "has_gt_calibration": has_gt_calibration,
             "label_status": label_status,
             "split": split,
             "frame_count_mismatch": mismatch,

@@ -299,13 +299,26 @@ describe('validateLabel', () => {
       expect(warn?.message).toContain('exceeds warning threshold');
     });
 
-    it('errors when calibration residual_px exceeds CALIB_ERROR_PX', () => {
+    it('errors when calibration residual_px exceeds CALIB_ERROR_PX without bad_calibration flag', () => {
       const label = createValidFinalLabel();
+      label.flags = [];
       label.calibration_gt!.residual_px = 14.2; // > 12.0
       const issues = validateLabel(label, baseMeta);
       const err = issues.find((i) => i.path === 'calibration_gt.residual_px' && i.severity === 'error');
       expect(err).toBeDefined();
       expect(err?.message).toContain('exceeds maximum error limit');
+    });
+
+    it('warns when calibration residual_px exceeds CALIB_ERROR_PX with bad_calibration flag set', () => {
+      const label = createValidFinalLabel();
+      label.flags = ['bad_calibration'];
+      label.calibration_gt!.residual_px = 14.2; // > 12.0
+      const issues = validateLabel(label, baseMeta);
+      const err = issues.find((i) => i.path === 'calibration_gt.residual_px' && i.severity === 'error');
+      expect(err).toBeUndefined();
+      const warn = issues.find((i) => i.path === 'calibration_gt.residual_px' && i.severity === 'warning');
+      expect(warn).toBeDefined();
+      expect(warn?.message).toContain('flagged as bad_calibration');
     });
 
     it('errors when calibration geometry is invalid', () => {

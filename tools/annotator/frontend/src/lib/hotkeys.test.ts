@@ -7,6 +7,15 @@ describe('keyToAction', () => {
     expect(keyToAction({ key: 'b', targetTag: 'textarea' })).toBeNull();
     expect(keyToAction({ key: '1', targetTag: 'SELECT' })).toBeNull();
     expect(keyToAction({ key: 's', ctrlKey: true, targetTag: 'input' })).toBeNull();
+    expect(keyToAction({ key: 'c', targetTag: 'INPUT' })).toBeNull();
+    expect(keyToAction({ key: 'C', targetTag: 'TEXTAREA' })).toBeNull();
+  });
+
+  it('maps C to toggleCalibrationMode', () => {
+    expect(keyToAction({ key: 'c' })).toEqual({ type: 'toggleCalibrationMode' });
+    expect(keyToAction({ key: 'C' })).toEqual({ type: 'toggleCalibrationMode' });
+    expect(keyToAction({ key: 'c', ctrlKey: true })).toBeNull();
+    expect(keyToAction({ key: 'c', altKey: true })).toBeNull();
   });
 
   it('maps tool arming keys R, B, H', () => {

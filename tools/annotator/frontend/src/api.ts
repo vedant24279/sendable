@@ -13,6 +13,8 @@ export interface ClipItem {
   ball_type: "white" | "red" | "pink" | null;
   has_results: boolean;
   has_calibration: boolean;
+  system_residual_px?: number | null;
+  has_gt_calibration?: boolean;
   label_status: "none" | "draft" | "final" | "flagged";
   split: "dev" | "final" | null;
   frame_count_mismatch?: boolean;

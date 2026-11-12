@@ -15,7 +15,8 @@ export type Action =
   | { type: 'saveDraft' }
   | { type: 'finalize' }
   | { type: 'disarm' }
-  | { type: 'nudge'; dx: number; dy: number };
+  | { type: 'nudge'; dx: number; dy: number }
+  | { type: 'toggleCalibrationMode' };
 
 export interface KeyContext {
   key: string;
@@ -83,6 +84,7 @@ export function keyToAction(ev: KeyContext): Action | null {
 
   // 8. Tool Arming: R (release), B (bounce), H (impact) - without Ctrl/Alt
   if (!ctrl && !alt) {
+    if (key === 'c' || key === 'C') return { type: 'toggleCalibrationMode' };
     if (key === 'r' || key === 'R') return { type: 'armTool', tool: 'release' };
     if (key === 'b' || key === 'B') return { type: 'armTool', tool: 'bounce' };
     if (key === 'h' || key === 'H') return { type: 'armTool', tool: 'impact' };

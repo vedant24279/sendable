@@ -278,12 +278,21 @@ export function validateLabel(
 
     if (label.calibration_gt.residual_px != null) {
       const res = label.calibration_gt.residual_px;
+      const hasBadCalibFlag = label.flags?.includes('bad_calibration');
       if (res > CALIB_ERROR_PX) {
-        issues.push({
-          path: 'calibration_gt.residual_px',
-          message: `Calibration residual (${res.toFixed(2)} px) exceeds maximum error limit (${CALIB_ERROR_PX} px)`,
-          severity: 'error',
-        });
+        if (hasBadCalibFlag) {
+          issues.push({
+            path: 'calibration_gt.residual_px',
+            message: `Calibration residual (${res.toFixed(2)} px) exceeds error limit (${CALIB_ERROR_PX} px), flagged as bad_calibration`,
+            severity: 'warning',
+          });
+        } else {
+          issues.push({
+            path: 'calibration_gt.residual_px',
+            message: `Calibration residual (${res.toFixed(2)} px) exceeds maximum error limit (${CALIB_ERROR_PX} px)`,
+            severity: 'error',
+          });
+        }
       } else if (res > CALIB_WARN_PX) {
         issues.push({
           path: 'calibration_gt.residual_px',

@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { FC } from 'react';
 import { useAnnotatorStore } from '../store';
 import { useLabelStore } from '../labelStore';
 import { computeGhostVisible } from '../lib/ghost';
+import { fitHomography, pixelToWorld } from '../lib/calibration';
+import { CalibrationPanel } from './CalibrationPanel';
 import {
   setMeta,
   setImpactType,
@@ -55,6 +57,31 @@ export const LabelPanel: FC = () => {
 
   const ghostVisible = computeGhostVisible(annotatorState);
   const isFinal = label.status === 'final';
+
+  // Compute homography for event pitch positions
+  const calibH = useMemo(() => {
+    if (!label?.calibration_gt?.points) return null;
+    const pts = label.calibration_gt.points;
+    if (pts.bat_L && pts.bat_R && pts.bowl_L && pts.bowl_R) {
+      try {
+        const fit = fitHomography(pts);
+        return fit.H;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }, [label?.calibration_gt?.points]);
+
+  const getPitchPos = (pt: { x: number; y: number } | null | undefined): string => {
+    if (!pt || pt.x == null || pt.y == null || !calibH) return '—';
+    try {
+      const [xm, zm] = pixelToWorld(calibH, pt.x, pt.y);
+      return `(${xm.toFixed(2)}, ${zm.toFixed(2)}) m`;
+    } catch {
+      return '—';
+    }
+  };
 
   const handleAdopt = () => {
     if (!prefill) return;
@@ -202,6 +229,19 @@ export const LabelPanel: FC = () => {
                 >
                   <span className="issue-icon">{issue.severity === 'error' ? '✖' : '▲'}</span>
                   <span className="issue-text">{issue.message}</span>
+                  {issue.path.startsWith('calibration_gt') && (
+                    <button
+                      type="button"
+                      className="btn-tiny btn-open-calib"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        annotatorState.setCalibrationMode(true);
+                      }}
+                      title="Open calibration mode"
+                    >
+                      Open calibration
+                    </button>
+                  )}
                 </li>
               );
             })}
@@ -209,125 +249,147 @@ export const LabelPanel: FC = () => {
         </div>
       )}
 
-      {/* 4. Events Table */}
-      <div className="events-table-section">
-        <h4 className="sub-title">Key Events</h4>
-        <table className="events-table">
-          <thead>
-            <tr>
-              <th>Event</th>
-              <th>Frame</th>
-              <th>Pos (X, Y)</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><span className="event-tag tag-release">Release</span></td>
-              <td>{label.release ? label.release.frame : '—'}</td>
-              <td>{label.release ? `${label.release.x.toFixed(1)}, ${label.release.y.toFixed(1)}` : '—'}</td>
-              <td>
-                <div className="row-actions">
-                  {label.release && (
-                    <button
-                      type="button"
-                      className="table-action-btn"
-                      onClick={() => setCurrentFrame(label.release!.frame)}
-                      title="Jump to frame"
-                    >
-                      Go
-                    </button>
-                  )}
-                  {label.release && (
-                    <button
-                      type="button"
-                      className="table-action-btn clear"
-                      onClick={() => apply((l) => clearEvent(l, 'release', { ghostVisible }))}
-                      title="Clear release"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              </td>
-            </tr>
-            <tr>
-              <td><span className="event-tag tag-bounce">Bounce</span></td>
-              <td>{label.bounce ? label.bounce.frame : '—'}</td>
-              <td>{label.bounce ? `${label.bounce.x.toFixed(1)}, ${label.bounce.y.toFixed(1)}` : '—'}</td>
-              <td>
-                <div className="row-actions">
-                  {label.bounce && (
-                    <button
-                      type="button"
-                      className="table-action-btn"
-                      onClick={() => setCurrentFrame(label.bounce!.frame)}
-                      title="Jump to frame"
-                    >
-                      Go
-                    </button>
-                  )}
-                  {label.bounce && (
-                    <button
-                      type="button"
-                      className="table-action-btn clear"
-                      onClick={() => apply((l) => clearEvent(l, 'bounce', { ghostVisible }))}
-                      title="Clear bounce"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              </td>
-            </tr>
-            <tr>
-              <td>
-                <span className="event-tag tag-impact">
-                  Impact {label.impact?.type ? `(${label.impact.type})` : ''}
-                </span>
-              </td>
-              <td>{label.impact?.frame != null ? label.impact.frame : '—'}</td>
-              <td>
-                {label.impact?.x != null && label.impact?.y != null
-                  ? `${label.impact.x.toFixed(1)}, ${label.impact.y.toFixed(1)}`
-                  : '—'}
-              </td>
-              <td>
-                <div className="row-actions">
-                  {label.impact?.frame != null && (
-                    <button
-                      type="button"
-                      className="table-action-btn"
-                      onClick={() => setCurrentFrame(label.impact!.frame!)}
-                      title="Jump to frame"
-                    >
-                      Go
-                    </button>
-                  )}
-                  {label.impact && (
-                    <button
-                      type="button"
-                      className="table-action-btn clear"
-                      onClick={() => apply((l) => clearEvent(l, 'impact', { ghostVisible }))}
-                      title="Clear impact"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              </td>
-            </tr>
-            <tr>
-              <td><span className="event-tag tag-end">Last Visible</span></td>
-              <td>{label.last_visible_frame != null ? label.last_visible_frame : '—'}</td>
-              <td>—</td>
-              <td>
-                <div className="row-actions">
-                  {label.last_visible_frame != null && (
-                    <button
-                      type="button"
-                      className="table-action-btn"
-                      onClick={() => setCurrentFrame(label.last_visible_frame!)}
+      {/* 4. Events Table or Calibration Panel */}
+      {annotatorState.calibrationMode ? (
+        <CalibrationPanel />
+      ) : (
+        <div className="events-table-section">
+          <div className="events-table-header-row">
+            <h4 className="sub-title">Key Events</h4>
+            <button
+              type="button"
+              className="btn-tiny btn-open-calib"
+              onClick={() => annotatorState.setCalibrationMode(true)}
+              title="Switch to pitch calibration mode (C)"
+            >
+              📐 Calibration (C)
+            </button>
+          </div>
+          <table className="events-table">
+            <thead>
+              <tr>
+                <th>Event</th>
+                <th>Frame</th>
+                <th>Pos (X, Y)</th>
+                <th>Pitch pos</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span className="event-tag tag-release">Release</span></td>
+                <td>{label.release ? label.release.frame : '—'}</td>
+                <td>{label.release ? `${label.release.x.toFixed(1)}, ${label.release.y.toFixed(1)}` : '—'}</td>
+                <td className="mono-text pitch-pos-cell">{getPitchPos(label.release)}</td>
+                <td>
+                  <div className="row-actions">
+                    {label.release && (
+                      <button
+                        type="button"
+                        className="table-action-btn"
+                        onClick={() => setCurrentFrame(label.release!.frame)}
+                        title="Jump to frame"
+                      >
+                        Go
+                      </button>
+                    )}
+                    {label.release && (
+                      <button
+                        type="button"
+                        className="table-action-btn clear"
+                        onClick={() => apply((l) => clearEvent(l, 'release', { ghostVisible }))}
+                        title="Clear release"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td><span className="event-tag tag-bounce">Bounce</span></td>
+                <td>{label.bounce ? label.bounce.frame : '—'}</td>
+                <td>{label.bounce ? `${label.bounce.x.toFixed(1)}, ${label.bounce.y.toFixed(1)}` : '—'}</td>
+                <td className="mono-text pitch-pos-cell">{getPitchPos(label.bounce)}</td>
+                <td>
+                  <div className="row-actions">
+                    {label.bounce && (
+                      <button
+                        type="button"
+                        className="table-action-btn"
+                        onClick={() => setCurrentFrame(label.bounce!.frame)}
+                        title="Jump to frame"
+                      >
+                        Go
+                      </button>
+                    )}
+                    {label.bounce && (
+                      <button
+                        type="button"
+                        className="table-action-btn clear"
+                        onClick={() => apply((l) => clearEvent(l, 'bounce', { ghostVisible }))}
+                        title="Clear bounce"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <span className="event-tag tag-impact">
+                    Impact {label.impact?.type ? `(${label.impact.type})` : ''}
+                  </span>
+                </td>
+                <td>{label.impact?.frame != null ? label.impact.frame : '—'}</td>
+                <td>
+                  {label.impact?.x != null && label.impact?.y != null
+                    ? `${label.impact.x.toFixed(1)}, ${label.impact.y.toFixed(1)}`
+                    : '—'}
+                </td>
+                <td className="mono-text pitch-pos-cell">
+                  {label.impact?.x != null && label.impact?.y != null
+                    ? getPitchPos({ x: label.impact.x, y: label.impact.y })
+                    : '—'}
+                </td>
+                <td>
+                  <div className="row-actions">
+                    {label.impact?.frame != null && (
+                      <button
+                        type="button"
+                        className="table-action-btn"
+                        onClick={() => setCurrentFrame(label.impact!.frame!)}
+                        title="Jump to frame"
+                      >
+                        Go
+                      </button>
+                    )}
+                    {label.impact && (
+                      <button
+                        type="button"
+                        className="table-action-btn clear"
+                        onClick={() => apply((l) => clearEvent(l, 'impact', { ghostVisible }))}
+                        title="Clear impact"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td><span className="event-tag tag-end">Last Visible</span></td>
+                <td>{label.last_visible_frame != null ? label.last_visible_frame : '—'}</td>
+                <td>—</td>
+                <td className="mono-text pitch-pos-cell">—</td>
+                <td>
+                  <div className="row-actions">
+                    {label.last_visible_frame != null && (
+                      <button
+                        type="button"
+                        className="table-action-btn"
+                        onClick={() => setCurrentFrame(label.last_visible_frame!)}
                       title="Jump to frame"
                     >
                       Go
@@ -349,6 +411,7 @@ export const LabelPanel: FC = () => {
           </tbody>
         </table>
       </div>
+      )}
 
       {/* 5. Impact Type Selection */}
       <div className="form-group">

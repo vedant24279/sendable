@@ -23,6 +23,9 @@ export default function App() {
   const setAutoAdvance = useAnnotatorStore((s) => s.setAutoAdvance);
   const annotatorName = useAnnotatorStore((s) => s.annotatorName);
   const setAnnotatorName = useAnnotatorStore((s) => s.setAnnotatorName);
+  const calibrationMode = useAnnotatorStore((s) => s.calibrationMode);
+  const toggleCalibrationMode = useAnnotatorStore((s) => s.toggleCalibrationMode);
+  const loupeMag = useAnnotatorStore((s) => s.loupeMag);
 
   // Activate keyboard shortcuts
   useHotkeys();
@@ -99,6 +102,13 @@ export default function App() {
               <span>Auto-advance after finalize</span>
             </label>
             <button
+              className={`toolbar-btn ${calibrationMode ? 'btn-active btn-calib' : ''}`}
+              onClick={toggleCalibrationMode}
+              title="Toggle Calibration Mode (C)"
+            >
+              📐 Calibration (C)
+            </button>
+            <button
               className={`toolbar-btn ${playing ? 'btn-active' : ''}`}
               onClick={togglePlaying}
               title="Toggle playback at 0.25x speed (Space)"
@@ -107,10 +117,14 @@ export default function App() {
             </button>
             <button
               className={`toolbar-btn ${loupeEnabled ? 'btn-active' : ''}`}
-              onClick={toggleLoupe}
-              title="Toggle 8x loupe magnifier (L or hold Alt)"
+              onClick={calibrationMode ? () => useAnnotatorStore.getState().cycleCalibLoupe() : toggleLoupe}
+              title={
+                calibrationMode
+                  ? 'Cycle loupe: 8x -> 16x -> off (L)'
+                  : 'Toggle 8x loupe magnifier (L or hold Alt)'
+              }
             >
-              🔍 Loupe (8x)
+              🔍 Loupe ({loupeMag}x)
             </button>
           </div>
         </header>
@@ -172,6 +186,14 @@ export default function App() {
               <div className="meta-row">
                 <dt>Calibration</dt>
                 <dd>{clip.has_calibration ? 'Available' : 'Missing'}</dd>
+              </div>
+              <div className="meta-row">
+                <dt>System Residual</dt>
+                <dd>
+                  {clip.system_residual_px != null
+                    ? `${clip.system_residual_px.toFixed(1)} px`
+                    : 'N/A'}
+                </dd>
               </div>
             </dl>
           ) : (

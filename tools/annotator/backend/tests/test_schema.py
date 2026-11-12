@@ -239,11 +239,18 @@ def test_schema_final_status_mandatory_fields():
 
 
 def test_schema_calibration_rules():
-    # Residual > CALIB_ERROR_PX (12.0)
+    # Residual > CALIB_ERROR_PX (12.0) without bad_calibration flag raises error
     data = base_valid_dict()
     data["calibration_gt"]["residual_px"] = 14.5
+    data["flags"] = []
     with pytest.raises((ValidationError, ValueError), match="exceeds CALIB_ERROR_PX"):
         validate_label(data)
+
+    # Residual > CALIB_ERROR_PX (12.0) with bad_calibration flag is valid
+    data["flags"] = ["bad_calibration"]
+    valid_flagged = validate_label(data)
+    assert valid_flagged.calibration_gt.residual_px == 14.5
+    assert "bad_calibration" in valid_flagged.flags
 
     # Non-convex quad
     data = base_valid_dict()

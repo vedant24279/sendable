@@ -1232,3 +1232,320 @@ kbd {
   flex-direction: column;
   gap: 0.35rem;
 }
+
+/* Calibration Mode & UI */
+.cursor-calib {
+  cursor: crosshair;
+}
+
+.btn-calib {
+  border-color: #a855f7 !important;
+  color: #c084fc !important;
+}
+
+.btn-calib.btn-active {
+  background-color: #7e22ce !important;
+  color: #ffffff !important;
+}
+
+.calib-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  background-color: #7e22ce;
+  color: #f3e8ff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  margin-left: 0.25rem;
+  flex-shrink: 0;
+}
+
+.clip-residual-tag {
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  color: #38bdf8;
+  font-size: 0.65rem;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+.sort-select {
+  margin-top: 0.25rem;
+}
+
+.calib-panel-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+}
+
+.calib-panel-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  border-bottom: 1px solid #334155;
+  padding-bottom: 0.5rem;
+}
+
+.calib-header-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.calib-exit-btn {
+  background-color: #334155;
+  border: 1px solid #475569;
+  color: #e2e8f0;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.calib-exit-btn:hover {
+  background-color: #475569;
+}
+
+.calib-meta-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.calib-source-badge {
+  font-size: 0.75rem;
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: #94a3b8;
+}
+
+.calib-residual-badge {
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.residual-pass {
+  background-color: rgba(34, 197, 94, 0.15);
+  border: 1px solid #22c55e;
+  color: #4ade80;
+}
+
+.residual-warn {
+  background-color: rgba(245, 158, 11, 0.15);
+  border: 1px solid #f59e0b;
+  color: #fbbf24;
+}
+
+.residual-error {
+  background-color: rgba(239, 68, 68, 0.15);
+  border: 1px solid #ef4444;
+  color: #f87171;
+}
+
+.residual-none {
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  color: #64748b;
+}
+
+.calib-stump-check-box {
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.75rem;
+  font-family: monospace;
+}
+
+.stump-check-label {
+  font-weight: 700;
+  color: #c084fc;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.stump-check-value {
+  color: #e2e8f0;
+}
+
+.expected-text {
+  color: #64748b;
+  font-size: 0.7rem;
+}
+
+.calib-issues-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.calib-issue-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  padding: 4px 6px;
+  border-radius: 3px;
+}
+
+.calib-points-table-wrapper {
+  overflow-x: auto;
+}
+
+.calib-points-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.calib-points-table th {
+  text-align: left;
+  padding: 4px 6px;
+  border-bottom: 1px solid #334155;
+  color: #94a3b8;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+.calib-points-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.calib-row {
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.calib-row:hover {
+  background-color: #1e293b;
+}
+
+.calib-row.row-selected {
+  background-color: rgba(56, 189, 248, 0.12);
+}
+
+.point-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.calib-color-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.point-text-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.point-code {
+  font-weight: 600;
+  color: #f1f5f9;
+  font-family: monospace;
+}
+
+.point-desc {
+  font-size: 0.65rem;
+  color: #64748b;
+}
+
+.point-actions-cell {
+  white-space: nowrap;
+}
+
+.btn-tiny {
+  background-color: #334155;
+  border: 1px solid #475569;
+  color: #e2e8f0;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  margin-right: 4px;
+  cursor: pointer;
+}
+
+.btn-tiny:hover:not(:disabled) {
+  background-color: #475569;
+}
+
+.btn-tiny:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-go {
+  color: #38bdf8;
+  border-color: #0284c7;
+}
+
+.btn-clear {
+  color: #f87171;
+  border-color: #dc2626;
+}
+
+.calib-actions-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.btn-action {
+  width: 100%;
+  font-size: 0.75rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.calib-hints-box {
+  background-color: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 0.5rem;
+  font-size: 0.7rem;
+  color: #94a3b8;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.calib-hints-box code {
+  color: #38bdf8;
+}
+
+.events-table-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.35rem;
+}
+
+.btn-open-calib {
+  background-color: #7e22ce;
+  border-color: #a855f7;
+  color: #f3e8ff;
+  font-weight: 600;
+}
+
+.btn-open-calib:hover {
+  background-color: #9333ea;
+}
+
+.pitch-pos-cell {
+  font-size: 0.75rem;
+  color: #38bdf8;
+}

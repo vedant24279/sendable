@@ -4,7 +4,14 @@ import { useLabelStore } from '../labelStore';
 import { frameCache } from '../lib/frameCache';
 import { keyToAction } from '../lib/hotkeys';
 import { computeGhostVisible } from '../lib/ghost';
-import { placeEvent, setImpactType, setLastVisible, round1 } from '../lib/labelModel';
+import {
+  placeEvent,
+  setImpactType,
+  setLastVisible,
+  setCalibrationPoint,
+  round1,
+} from '../lib/labelModel';
+import { cycleCalibPoint } from '../lib/calibUi';
 
 export function useHotkeys(): void {
   const selectedClipId = useAnnotatorStore((s) => s.selectedClipId);
@@ -56,7 +63,11 @@ export function useHotkeys(): void {
         const gv = computeGhostVisible(aStore);
 
         switch (action.type) {
+          case 'toggleCalibrationMode':
+            aStore.toggleCalibrationMode();
+            break;
           case 'armTool':
+            if (aStore.calibrationMode) break;
             setArmedTool(action.tool);
             break;
           case 'disarm':
@@ -64,9 +75,11 @@ export function useHotkeys(): void {
             setSelectedPin(null);
             break;
           case 'setLastVisible':
+            if (aStore.calibrationMode) break;
             lStore.apply((prev) => setLastVisible(prev, currentFrameRef.current, { ghostVisible: gv }));
             break;
           case 'setImpactType':
+            if (aStore.calibrationMode) break;
             lStore.apply((prev) => setImpactType(prev, action.impactType, { ghostVisible: gv }));
             break;
           case 'undo':
@@ -95,14 +108,28 @@ export function useHotkeys(): void {
             })();
             break;
           case 'nudge': {
-            const pin = aStore.selectedPin;
-            if (pin && lStore.label) {
-              const pt = lStore.label[pin.kind];
-              const f = pt?.frame;
-              if (pt && typeof f === 'number' && pt.x != null && pt.y != null) {
-                const nx = round1(pt.x + action.dx);
-                const ny = round1(pt.y + action.dy);
-                lStore.apply((prev) => placeEvent(prev, pin.kind, f, nx, ny, { ghostVisible: gv }));
+            if (aStore.calibrationMode) {
+              const sel = aStore.selectedCalibPoint;
+              if (sel && lStore.label?.calibration_gt?.points?.[sel]) {
+                const [curX, curY] = lStore.label.calibration_gt.points[sel];
+                const nx = round1(curX + action.dx);
+                const ny = round1(curY + action.dy);
+                lStore.apply((prev) =>
+                  setCalibrationPoint(prev, sel, nx, ny, aStore.prefill?.calibration, {
+                    ghostVisible: gv,
+                  })
+                );
+              }
+            } else {
+              const pin = aStore.selectedPin;
+              if (pin && lStore.label) {
+                const pt = lStore.label[pin.kind];
+                const f = pt?.frame;
+                if (pt && typeof f === 'number' && pt.x != null && pt.y != null) {
+                  const nx = round1(pt.x + action.dx);
+                  const ny = round1(pt.y + action.dy);
+                  lStore.apply((prev) => placeEvent(prev, pin.kind, f, nx, ny, { ghostVisible: gv }));
+                }
               }
             }
             break;
@@ -120,15 +147,31 @@ export function useHotkeys(): void {
         return;
       }
 
+      // Tab / Shift+Tab cycles calibration point handles in calibration mode
+      if (e.key === 'Tab') {
+        const aStore = useAnnotatorStore.getState();
+        if (aStore.calibrationMode) {
+          e.preventDefault();
+          const nextPt = cycleCalibPoint(aStore.selectedCalibPoint, e.shiftKey);
+          aStore.setSelectedCalibPoint(nextPt);
+          return;
+        }
+      }
+
       // Alt key hold for loupe
       if (e.key === 'Alt') {
         setAltHeld(true);
         return;
       }
 
-      // Loupe toggle
+      // Loupe toggle / cycle
       if (e.key === 'l' || e.key === 'L') {
-        toggleLoupe();
+        const aStore = useAnnotatorStore.getState();
+        if (aStore.calibrationMode) {
+          aStore.cycleCalibLoupe();
+        } else {
+          toggleLoupe();
+        }
         return;
       }
 

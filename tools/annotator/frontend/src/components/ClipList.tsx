@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { FC } from 'react';
 import { useAnnotatorStore } from '../store';
+import { useLabelStore } from '../labelStore';
 
 export const ClipList: FC = () => {
   const clips = useAnnotatorStore((s) => s.clips);
@@ -9,17 +10,29 @@ export const ClipList: FC = () => {
   const loadingClips = useAnnotatorStore((s) => s.loadingClips);
   const error = useAnnotatorStore((s) => s.error);
   const loadClips = useAnnotatorStore((s) => s.loadClips);
+  const currentLabel = useLabelStore((s) => s.label);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'none' | 'draft' | 'final' | 'flagged'>('all');
+  const [sortBy, setSortBy] = useState<'default' | 'system_residual'>('default');
 
   const filteredClips = useMemo(() => {
-    return clips.filter((c) => {
+    const list = clips.filter((c) => {
       const matchesSearch = c.clip_id.toLowerCase().includes(search.toLowerCase());
       const matchesStatus = statusFilter === 'all' || c.label_status === statusFilter;
       return matchesSearch && matchesStatus;
     });
-  }, [clips, search, statusFilter]);
+
+    if (sortBy === 'system_residual') {
+      list.sort((a, b) => {
+        const resA = a.system_residual_px != null ? a.system_residual_px : -1;
+        const resB = b.system_residual_px != null ? b.system_residual_px : -1;
+        return resB - resA;
+      });
+    }
+
+    return list;
+  }, [clips, search, statusFilter, sortBy]);
 
   return (
     <aside className="clip-list-pane">
@@ -44,6 +57,15 @@ export const ClipList: FC = () => {
             <option value="final">Final</option>
             <option value="flagged">Flagged</option>
           </select>
+          <select
+            className="filter-select sort-select"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+            title="Sort clips list"
+          >
+            <option value="default">Default order</option>
+            <option value="system_residual">By system residual (high to low)</option>
+          </select>
         </div>
       </div>
 
@@ -63,6 +85,10 @@ export const ClipList: FC = () => {
         )}
         {filteredClips.map((clip) => {
           const isSelected = clip.clip_id === selectedClipId;
+          const hasGt =
+            clip.has_gt_calibration ||
+            (clip.clip_id === selectedClipId && Boolean(currentLabel?.calibration_gt));
+
           return (
             <div
               key={clip.clip_id}
@@ -71,6 +97,11 @@ export const ClipList: FC = () => {
             >
               <div className="clip-row-main">
                 <span className="clip-title">{clip.clip_id}</span>
+                {hasGt && (
+                  <span className="calib-badge" title="Has ground-truth calibration">
+                    C
+                  </span>
+                )}
                 {clip.frame_count_mismatch && (
                   <span className="badge-warning-icon" title="Frame count mismatch with video metadata!">
                     ⚠️
@@ -85,6 +116,11 @@ export const ClipList: FC = () => {
                   {clip.ball_type || 'N/A'}
                 </span>
                 <span className="clip-meta-frames">{clip.frame_count} frames</span>
+                {clip.system_residual_px != null && (
+                  <span className="clip-residual-tag" title="System stump residual">
+                    {clip.system_residual_px.toFixed(1)} px
+                  </span>
+                )}
                 <span className={`results-badge ${clip.has_results ? 'has-results' : 'no-results'}`}>
                   {clip.has_results ? 'Results' : 'No Res'}
                 </span>

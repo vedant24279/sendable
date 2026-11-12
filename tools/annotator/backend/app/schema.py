@@ -174,6 +174,7 @@ class Label(BaseModel):
             if (
                 self.calibration_gt.residual_px is not None
                 and self.calibration_gt.residual_px > CALIB_ERROR_PX
+                and "bad_calibration" not in self.flags
             ):
                 raise ValueError(
                     f"calibration_gt residual_px ({self.calibration_gt.residual_px:.2f} px) exceeds CALIB_ERROR_PX ({CALIB_ERROR_PX} px)"

@@ -4,6 +4,7 @@ import { Viewport } from './lib/viewport';
 import { frameCache } from './lib/frameCache';
 import { LabelStatus } from './lib/labelModel';
 import { ToolKind } from './lib/hotkeys';
+import { CalibrationPointName } from './lib/calibConstants';
 
 export interface OverlayToggles {
   ghostTrajectory: boolean;
@@ -31,6 +32,9 @@ export interface AnnotatorState {
   selectedPin: { kind: ToolKind } | null;
   autoAdvance: boolean;
   annotatorName: string;
+  calibrationMode: boolean;
+  selectedCalibPoint: CalibrationPointName | null;
+  loupeMag: 8 | 16;
 
   // Actions
   loadClips: (retries?: number) => Promise<void>;
@@ -49,8 +53,13 @@ export interface AnnotatorState {
   setAutoAdvance: (enabled: boolean) => void;
   setAnnotatorName: (name: string) => void;
   updateClipLabelStatus: (clipId: string, status: LabelStatus) => void;
+  updateClipHasGtCalibration: (clipId: string, hasGt: boolean) => void;
   selectPrevClip: () => void;
   selectNextClip: () => void;
+  toggleCalibrationMode: () => void;
+  setCalibrationMode: (enabled: boolean) => void;
+  setSelectedCalibPoint: (point: CalibrationPointName | null) => void;
+  cycleCalibLoupe: () => void;
 }
 
 export const useAnnotatorStore = create<AnnotatorState>((set, get) => ({
@@ -77,6 +86,9 @@ export const useAnnotatorStore = create<AnnotatorState>((set, get) => ({
   selectedPin: null,
   autoAdvance: true,
   annotatorName: 'vedant',
+  calibrationMode: false,
+  selectedCalibPoint: 'bat_L',
+  loupeMag: 8,
 
   setArmedTool: (tool) => set({ armedTool: tool }),
   setSelectedPin: (pin) => set({ selectedPin: pin }),
@@ -89,6 +101,48 @@ export const useAnnotatorStore = create<AnnotatorState>((set, get) => ({
         c.clip_id === clipId ? { ...c, label_status: status } : c
       ),
     })),
+  updateClipHasGtCalibration: (clipId, hasGt) =>
+    set((state) => ({
+      clips: state.clips.map((c) =>
+        c.clip_id === clipId ? { ...c, has_gt_calibration: hasGt } : c
+      ),
+    })),
+  toggleCalibrationMode: () =>
+    set((state) => {
+      const nextMode = !state.calibrationMode;
+      return {
+        calibrationMode: nextMode,
+        armedTool: null,
+        selectedPin: null,
+        loupeEnabled: nextMode ? true : state.loupeEnabled,
+        loupeMag: nextMode ? 8 : state.loupeMag,
+        selectedCalibPoint: nextMode
+          ? (state.selectedCalibPoint || 'bat_L')
+          : state.selectedCalibPoint,
+      };
+    }),
+  setCalibrationMode: (calibrationMode) =>
+    set((state) => ({
+      calibrationMode,
+      armedTool: null,
+      selectedPin: null,
+      loupeEnabled: calibrationMode ? true : state.loupeEnabled,
+      loupeMag: calibrationMode ? 8 : state.loupeMag,
+      selectedCalibPoint: calibrationMode
+        ? (state.selectedCalibPoint || 'bat_L')
+        : state.selectedCalibPoint,
+    })),
+  setSelectedCalibPoint: (selectedCalibPoint) => set({ selectedCalibPoint }),
+  cycleCalibLoupe: () =>
+    set((state) => {
+      if (!state.loupeEnabled) {
+        return { loupeEnabled: true, loupeMag: 8 };
+      }
+      if (state.loupeMag === 8) {
+        return { loupeEnabled: true, loupeMag: 16 };
+      }
+      return { loupeEnabled: false, loupeMag: 8 };
+    }),
 
   loadClips: async (retries = 5) => {
     set({ loadingClips: true, error: null });

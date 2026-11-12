@@ -505,6 +505,52 @@ export function setCalibrationPoint(
 }
 
 /**
+ * Clears a single calibration point by name.
+ */
+export function clearCalibrationPoint(
+  label: Label,
+  name: CalibrationPointName,
+  systemPoints?:
+    | Record<string, [number, number]>
+    | Array<{ name: string; x: number; y: number }>
+    | null,
+  ctx?: EditContext
+): Label {
+  if (!label.calibration_gt) return label;
+  const newPoints = { ...label.calibration_gt.points } as Record<string, [number, number]>;
+  delete newPoints[name];
+
+  let residual_px: number | null = null;
+  const allPresent = CALIB_POINT_NAMES.every((k) => newPoints[k]);
+  if (allPresent) {
+    try {
+      const fit = fitHomography(newPoints as Record<CalibrationPointName, [number, number]>);
+      residual_px = fit.residual_px;
+    } catch {
+      residual_px = null;
+    }
+  }
+
+  const normSys =
+    normalizeSystemPoints(systemPoints) ??
+    ({} as Record<CalibrationPointName, [number, number]>);
+  const source = classifySource(newPoints, normSys);
+  const now = new Date().toISOString();
+
+  return {
+    ...label,
+    calibration_gt: {
+      points: newPoints as Record<CalibrationPointName, [number, number]>,
+      source,
+      residual_px,
+      updated_at: now,
+    },
+    mode: nextMode(label.mode, ctx),
+    updated_at: now,
+  };
+}
+
+/**
  * Accepts system calibration points, setting source to "system_verified".
  */
 export function acceptSystemCalibration(

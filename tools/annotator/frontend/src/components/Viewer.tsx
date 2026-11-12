@@ -14,7 +14,20 @@ import {
 import { frameCache } from '../lib/frameCache';
 import { computeGhostVisible } from '../lib/ghost';
 import { pinsForFrame, hitTestPin } from '../lib/pins';
-import { placeEvent, round1 } from '../lib/labelModel';
+import { placeEvent, setCalibrationPoint, round1 } from '../lib/labelModel';
+import {
+  hitTestCalibPoint,
+  nextMissingCalibPoint,
+  formatPitchPos,
+  CALIB_HANDLE_COLORS,
+} from '../lib/calibUi';
+import {
+  fitHomography,
+  pitchGridSegments,
+  pixelToWorld,
+  worldToPixel,
+} from '../lib/calibration';
+import { CALIB_POINT_NAMES, CalibrationPointName } from '../lib/calibConstants';
 
 export const Viewer: FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -36,6 +49,10 @@ export const Viewer: FC = () => {
     setArmedTool,
     selectedPin,
     setSelectedPin,
+    calibrationMode,
+    selectedCalibPoint,
+    setSelectedCalibPoint,
+    loupeMag,
   } = annotatorState;
 
   const { label, apply } = useLabelStore();
@@ -59,6 +76,10 @@ export const Viewer: FC = () => {
   // Pin drag handling refs
   const isDraggingPinRef = useRef<boolean>(false);
   const dragCurrentImgPosRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Calibration handle drag refs
+  const isDraggingCalibRef = useRef<boolean>(false);
+  const draggedCalibNameRef = useRef<CalibrationPointName | null>(null);
 
   const viewDimensionsRef = useRef<{ w: number; h: number }>({ w: 800, h: 600 });
   const viewportRef = useRef<Viewport>(viewport);
@@ -103,15 +124,44 @@ export const Viewer: FC = () => {
       const t = frameToTime(currentFrame, clip.fps).toFixed(3);
       const zoomPct = (vp.scale * 100).toFixed(0);
 
+      // Check for valid homography
+      let calibH: number[][] | null = null;
+      if (label?.calibration_gt?.points) {
+        const pts = label.calibration_gt.points;
+        if (pts.bat_L && pts.bat_R && pts.bowl_L && pts.bowl_R) {
+          try {
+            const fit = fitHomography(pts);
+            calibH = fit.H;
+          } catch {
+            calibH = null;
+          }
+        }
+      }
+
       let cursorStr = 'cursor (—, —)';
+      let pitchStr = '';
       if (cursorScreen) {
         const imgPt = screenToImage(cursorScreen, vp);
         cursorStr = `cursor (${imgPt.x.toFixed(1)}, ${imgPt.y.toFixed(1)})`;
+        if (calibH) {
+          try {
+            const [pxm, pzm] = pixelToWorld(calibH, imgPt.x, imgPt.y);
+            pitchStr = formatPitchPos(pxm, pzm);
+          } catch {
+            pitchStr = '';
+          }
+        }
       }
 
-      statusRef.current.textContent = `Frame ${currentFrame} / ${clip.frame_count - 1}   t = ${t} s   ${cursorStr}   zoom ${zoomPct}%`;
+      if (calibrationMode) {
+        const activeHandle = selectedCalibPoint ? `[Handle: ${selectedCalibPoint}]` : '[Calibration Mode]';
+        statusRef.current.textContent = `${activeHandle}   ${pitchStr ? `${pitchStr}   ` : ''}${cursorStr}   zoom ${zoomPct}%`;
+      } else {
+        const extraPitch = pitchStr ? `${pitchStr}   ` : '';
+        statusRef.current.textContent = `Frame ${currentFrame} / ${clip.frame_count - 1}   t = ${t} s   ${extraPitch}${cursorStr}   zoom ${zoomPct}%`;
+      }
     },
-    [clip, currentFrame, armedTool]
+    [clip, currentFrame, armedTool, label, calibrationMode, selectedCalibPoint]
   );
 
   // Main canvas drawing function
@@ -151,8 +201,8 @@ export const Viewer: FC = () => {
       ctx.drawImage(bitmap, destX, destY, destW, destH);
     }
 
-    // 3. Calibration Overlay
-    if (overlays.calibration && prefill?.calibration) {
+    // 3. Calibration Overlay (in standard mode)
+    if (!calibrationMode && overlays.calibration && prefill?.calibration) {
       const calibMap = new Map<string, Point>();
       prefill.calibration.forEach((pt) => calibMap.set(pt.name, { x: pt.x, y: pt.y }));
 
@@ -350,8 +400,137 @@ export const Viewer: FC = () => {
       );
     });
 
-    // 7. Loupe Magnifier (Offset up-right: cursor + (28, -28 - size), flipped when leaving canvas)
-    const isLoupeActive = (loupeEnabled || altHeld) && isMouseOverRef.current && bitmap;
+    // 7. Calibration Mode Overlays (Pitch rectangle, 1m grid, predicted stumps, 6 handles)
+    if (calibrationMode) {
+      const calibGT = label?.calibration_gt;
+      const points = (calibGT?.points || {}) as Record<string, [number, number]>;
+
+      // Check if 4 corner points exist to fit H
+      const hasCorners = points.bat_L && points.bat_R && points.bowl_L && points.bowl_R;
+      if (hasCorners) {
+        try {
+          const fit = fitHomography(points as Record<CalibrationPointName, [number, number]>);
+
+          // A. Draw 1m pitch grid lines (thin, semi-transparent)
+          const segments = pitchGridSegments(fit.H, 1.0);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+          ctx.lineWidth = 1;
+          for (const [p1, p2] of segments) {
+            const s1 = imageToScreen({ x: p1[0], y: p1[1] }, vp);
+            const s2 = imageToScreen({ x: p2[0], y: p2[1] }, vp);
+            ctx.beginPath();
+            ctx.moveTo(s1.x, s1.y);
+            ctx.lineTo(s2.x, s2.y);
+            ctx.stroke();
+          }
+
+          // B. Draw pitch rectangle outline
+          const sBowlL = imageToScreen({ x: points.bowl_L[0], y: points.bowl_L[1] }, vp);
+          const sBowlR = imageToScreen({ x: points.bowl_R[0], y: points.bowl_R[1] }, vp);
+          const sBatR = imageToScreen({ x: points.bat_R[0], y: points.bat_R[1] }, vp);
+          const sBatL = imageToScreen({ x: points.bat_L[0], y: points.bat_L[1] }, vp);
+
+          ctx.beginPath();
+          ctx.moveTo(sBowlL.x, sBowlL.y);
+          ctx.lineTo(sBowlR.x, sBowlR.y);
+          ctx.lineTo(sBatR.x, sBatR.y);
+          ctx.lineTo(sBatL.x, sBatL.y);
+          ctx.closePath();
+
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(56, 189, 248, 0.08)';
+          ctx.fill();
+
+          // C. Draw the two stump positions PREDICTED by the homography as hollow circles
+          // bat_stump predicted at world (0.0, 0.0)
+          const predBat = worldToPixel(fit.H, 0.0, 0.0, fit.H_inv);
+          const sPredBat = imageToScreen({ x: predBat[0], y: predBat[1] }, vp);
+          ctx.beginPath();
+          ctx.arc(sPredBat.x, sPredBat.y, 8, 0, Math.PI * 2);
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([4, 3]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = 'bold 10px system-ui, sans-serif';
+          ctx.fillStyle = '#f59e0b';
+          ctx.textAlign = 'left';
+          ctx.fillText('pred bat stump', sPredBat.x + 10, sPredBat.y + 3);
+
+          // bowl_stump predicted at world (0.0, 20.12)
+          const predBowl = worldToPixel(fit.H, 0.0, 20.12, fit.H_inv);
+          const sPredBowl = imageToScreen({ x: predBowl[0], y: predBowl[1] }, vp);
+          ctx.beginPath();
+          ctx.arc(sPredBowl.x, sPredBowl.y, 8, 0, Math.PI * 2);
+          ctx.strokeStyle = '#a855f7';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([4, 3]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = 'bold 10px system-ui, sans-serif';
+          ctx.fillStyle = '#a855f7';
+          ctx.textAlign = 'left';
+          ctx.fillText('pred bowl stump', sPredBowl.x + 10, sPredBowl.y + 3);
+        } catch {
+          // Degenerate homography, skip grid
+        }
+      }
+
+      // D. Draw the 6 calibration point handles
+      for (const name of CALIB_POINT_NAMES) {
+        let pt = points[name];
+        if (
+          isDraggingCalibRef.current &&
+          draggedCalibNameRef.current === name &&
+          dragCurrentImgPosRef.current
+        ) {
+          pt = [dragCurrentImgPosRef.current.x, dragCurrentImgPosRef.current.y];
+        }
+
+        if (pt) {
+          const sPt = imageToScreen({ x: pt[0], y: pt[1] }, vp);
+          const isSelected = selectedCalibPoint === name;
+          const color = CALIB_HANDLE_COLORS[name];
+
+          // Selected outer ring
+          if (isSelected) {
+            ctx.beginPath();
+            ctx.arc(sPt.x, sPt.y, 11, 0, Math.PI * 2);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+          }
+
+          // Handle solid circle
+          ctx.beginPath();
+          ctx.arc(sPt.x, sPt.y, 6, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.fill();
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // Text badge
+          ctx.font = 'bold 11px system-ui, sans-serif';
+          const badgeText = `${name} (${pt[0].toFixed(1)}, ${pt[1].toFixed(1)})`;
+          const textW = ctx.measureText(badgeText).width;
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+          ctx.fillRect(sPt.x + 9, sPt.y - 9, textW + 8, 18);
+          ctx.fillStyle = color;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(badgeText, sPt.x + 13, sPt.y);
+        }
+      }
+    }
+
+    // 8. Loupe Magnifier (Offset up-right: cursor + (28, -28 - size), flipped when leaving canvas)
+    const isLoupeActive =
+      (calibrationMode ? loupeEnabled : (loupeEnabled || altHeld)) &&
+      isMouseOverRef.current &&
+      bitmap;
     if (isLoupeActive && bitmap) {
       const cursor = mousePosRef.current;
       const imgCursor = screenToImage(cursor, vp);
@@ -363,8 +542,8 @@ export const Viewer: FC = () => {
         imgCursor.y <= clip.height
       ) {
         const loupeSize = 160;
-        const zoomFactor = 8.0;
-        const srcSize = loupeSize / zoomFactor; // 20 image px
+        const zoomFactor = calibrationMode ? (loupeMag || 8.0) : 8.0;
+        const srcSize = loupeSize / zoomFactor; // source image pixels
 
         const sx = imgCursor.x - srcSize / 2;
         const sy = imgCursor.y - srcSize / 2;
@@ -398,7 +577,7 @@ export const Viewer: FC = () => {
         ctx.drawImage(bitmap, sx, sy, srcSize, srcSize, dx, dy, loupeSize, loupeSize);
 
         // Loupe border
-        ctx.strokeStyle = '#38bdf8';
+        ctx.strokeStyle = calibrationMode ? '#a855f7' : '#38bdf8';
         ctx.lineWidth = 2;
         ctx.strokeRect(dx, dy, loupeSize, loupeSize);
 
@@ -429,6 +608,9 @@ export const Viewer: FC = () => {
     annotatorState,
     label,
     selectedPin,
+    calibrationMode,
+    selectedCalibPoint,
+    loupeMag,
   ]);
 
   // Subscribe to frameCache updates to re-render when image is loaded
@@ -524,8 +706,46 @@ export const Viewer: FC = () => {
     };
     const imgPt = screenToImage(cursor, viewportRef.current);
 
-    // Left button (0): Tool placement OR Pin Selection / Dragging
+    // Left button (0): Tool placement OR Calibration Handle OR Pin Selection / Dragging
     if (e.button === 0) {
+      if (calibrationMode) {
+        const calibGT = label?.calibration_gt;
+        const points = (calibGT?.points || {}) as Record<string, [number, number]>;
+        const hit = hitTestCalibPoint(points, imgPt.x, imgPt.y, viewportRef.current.scale, 14);
+
+        if (hit) {
+          setSelectedCalibPoint(hit);
+          isDraggingCalibRef.current = true;
+          draggedCalibNameRef.current = hit;
+          dragCurrentImgPosRef.current = { x: points[hit][0], y: points[hit][1] };
+          draw();
+          return;
+        }
+
+        // Clicked on empty space: place selected point or next missing point
+        const clampedX = round1(Math.max(0, Math.min(clip.width, imgPt.x)));
+        const clampedY = round1(Math.max(0, Math.min(clip.height, imgPt.y)));
+        const targetName =
+          selectedCalibPoint && !points[selectedCalibPoint]
+            ? selectedCalibPoint
+            : nextMissingCalibPoint(points, selectedCalibPoint) || selectedCalibPoint || 'bat_L';
+
+        const ghostVis = computeGhostVisible(useAnnotatorStore.getState());
+        apply((prev) =>
+          setCalibrationPoint(prev, targetName, clampedX, clampedY, prefill?.calibration, {
+            ghostVisible: ghostVis,
+          })
+        );
+
+        // Advance to next missing point
+        const simulated = { ...points, [targetName]: [clampedX, clampedY] };
+        const nextMissing = nextMissingCalibPoint(simulated, targetName);
+        if (nextMissing) {
+          setSelectedCalibPoint(nextMissing);
+        }
+        return;
+      }
+
       if (armedTool) {
         // Impact requires an impact type first
         if (
@@ -590,6 +810,17 @@ export const Viewer: FC = () => {
     mousePosRef.current = cursor;
     isMouseOverRef.current = true;
 
+    // Calibration handle dragging
+    if (isDraggingCalibRef.current && draggedCalibNameRef.current) {
+      const imgPt = screenToImage(cursor, viewportRef.current);
+      const clampedX = round1(Math.max(0, Math.min(clip.width, imgPt.x)));
+      const clampedY = round1(Math.max(0, Math.min(clip.height, imgPt.y)));
+      dragCurrentImgPosRef.current = { x: clampedX, y: clampedY };
+      draw();
+      updateStatusBar(cursor);
+      return;
+    }
+
     // Pin dragging
     if (isDraggingPinRef.current && selectedPin) {
       const imgPt = screenToImage(cursor, viewportRef.current);
@@ -622,6 +853,24 @@ export const Viewer: FC = () => {
   };
 
   const handleMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Left mouse up finishes calibration handle drag
+    if (e.button === 0 && isDraggingCalibRef.current && draggedCalibNameRef.current) {
+      isDraggingCalibRef.current = false;
+      const target = draggedCalibNameRef.current;
+      draggedCalibNameRef.current = null;
+      if (dragCurrentImgPosRef.current) {
+        const { x: nx, y: ny } = dragCurrentImgPosRef.current;
+        dragCurrentImgPosRef.current = null;
+        const ghostVis = computeGhostVisible(useAnnotatorStore.getState());
+        apply((prev) =>
+          setCalibrationPoint(prev, target, nx, ny, prefill?.calibration, {
+            ghostVisible: ghostVis,
+          })
+        );
+      }
+      return;
+    }
+
     // Left mouse up finishes pin drag
     if (e.button === 0 && isDraggingPinRef.current && selectedPin) {
       isDraggingPinRef.current = false;
@@ -647,6 +896,19 @@ export const Viewer: FC = () => {
   const handleMouseLeave = () => {
     isMouseOverRef.current = false;
     isPanningRef.current = false;
+    if (isDraggingCalibRef.current && draggedCalibNameRef.current && dragCurrentImgPosRef.current) {
+      isDraggingCalibRef.current = false;
+      const target = draggedCalibNameRef.current;
+      draggedCalibNameRef.current = null;
+      const { x: nx, y: ny } = dragCurrentImgPosRef.current;
+      dragCurrentImgPosRef.current = null;
+      const ghostVis = computeGhostVisible(useAnnotatorStore.getState());
+      apply((prev) =>
+        setCalibrationPoint(prev, target, nx, ny, prefill?.calibration, {
+          ghostVisible: ghostVis,
+        })
+      );
+    }
     if (isDraggingPinRef.current && selectedPin && dragCurrentImgPosRef.current) {
       isDraggingPinRef.current = false;
       const { x: nx, y: ny } = dragCurrentImgPosRef.current;
@@ -685,7 +947,7 @@ export const Viewer: FC = () => {
       <div className="viewer-canvas-box" ref={containerRef}>
         <canvas
           ref={canvasRef}
-          className={`viewer-canvas ${armedTool ? 'cursor-armed' : ''}`}
+          className={`viewer-canvas ${calibrationMode ? 'cursor-calib' : armedTool ? 'cursor-armed' : ''}`}
           onContextMenu={(e) => e.preventDefault()}
           onWheel={handleWheel}
           onMouseDown={handleMouseDown}

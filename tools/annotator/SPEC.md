@@ -276,3 +276,36 @@ Additive optional field on `Label`:
   - `bowler_type` is non-null (`"pace"` or `"spin"`).
   - `lighting` is non-null (`"bright"`, `"overcast"`, or `"low"`).
   - When `impact.type === "pad"`, `lbw` must be non-null.
+
+- **Bad Calibration Flag Exception**:
+  A calibration residual above `CALIB_ERROR_PX` (12.0 px) is treated as a blocking validation error only when the label does NOT contain the flag `"bad_calibration"`. When `"bad_calibration"` is set, it is downgraded to a non-blocking warning.
+
+## 9. Calibration UI
+
+### 9.1 Mode & Controls
+- **Toggle Mode**: Keyboard shortcut `C` toggles Calibration Mode on/off (ignored inside form inputs/selects). Also accessible via the `📐 Calibration (C)` toolbar button and "Open calibration" issue links.
+- **Tool Disarming**: Entering Calibration Mode disarms all event placement tools (`R`, `B`, `H`, `E`).
+- **Handle Selection**: `Tab` and `Shift+Tab` cycle forward and backward through the six calibration handles (`bat_L`, `bat_R`, `bowl_L`, `bowl_R`, `bat_stump`, `bowl_stump`).
+- **Fine Adjustment**: `Ctrl+Arrow` nudges the selected calibration handle by $1.0\text{ px}$; `Ctrl+Shift+Arrow` nudges by $0.1\text{ px}$.
+
+### 9.2 Canvas Overlays
+- **Handles**: Six draggable circular handles color-coded by role (`bat_L`: cyan, `bat_R`: blue, `bowl_L`: emerald, `bowl_R`: green, `bat_stump`: amber, `bowl_stump`: purple). The active handle is ringed with a white outer border.
+- **Click-to-Place Sequence**: Clicking empty canvas space places the currently selected point (or the first missing point) and automatically advances selection to the next missing handle.
+- **Pitch Rectangle & 1 m Grid**: Projected onto the canvas using $H$ when the 4 corners are placed; 1 m grid lines rendered as thin semi-transparent lines ($22\%$ opacity).
+- **Predicted Stump Positions**: Homography-projected middle stump locations rendered as dashed hollow circles alongside clicked stump points to expose reprojection gaps.
+- **Loupe Magnifier**: Always active in calibration mode; pressing `L` cycles magnification through `8x -> 16x -> off`.
+
+### 9.3 Calibration Panel (`src/components/CalibrationPanel.tsx`)
+- Replaces the event table in the side panel while in Calibration Mode.
+- Shows real-time stump residual error badge (green $< 4\text{ px}$, amber $4-12\text{ px}$, red $> 12\text{ px}$) and source badge (`system_verified`, `system_adjusted`, or `manual`).
+- **Stump Check Readout**: Displays longitudinal $Z$ coordinates projected from clicked stump pixels:
+  `Stump check: bat end Z = x.xx m (expected 0.00) | bowl end Z = x.xx m (expected 20.12)`.
+- **Table of Points**: Lists all 6 landmarks with $(x, y)$ coordinates, `Go` (center & 4x zoom), and `Clear` buttons.
+- **Batch Actions**: "Accept system calibration", "Reset to system", and "Clear all".
+- **Guidance & Hints**: Instructs annotators on finding the true ground base below the middle stump and checking first/last frames for camera movement.
+
+### 9.4 Metric Readouts & Clip List Badges
+- **Status Bar Metric Readout**: When calibration is valid, the bottom status bar displays real-time cursor ground-plane position in metres: `pitch_x_m: +x.xx m, pitch_z_m: +z.xx m`.
+- **Events Table Pitch Column**: Key Events table includes a `Pitch pos` column showing projected metric positions $(X, Z)\text{ m}$ for Release, Bounce, and Impact.
+- **Clip List Calibration Badge**: Clips with `calibration_gt` display a purple `C` badge in the clip list.
+- **Sorting**: Clip list supports sorting "By system residual (high to low)" based on prefill `system_residual_px`.
