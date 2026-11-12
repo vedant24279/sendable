@@ -321,3 +321,28 @@ def test_schema_bounds_validation():
     data["bounce"]["y"] = -0.5
     with pytest.raises((ValidationError, ValueError), match="y coordinate .* out of bounds"):
         validate_label(data, frame_count=30, width=500, height=500)
+
+
+def test_schema_stump_confirmed_defaults_and_null_residual():
+    data = base_valid_dict()
+    # Remove stump_confirmed and set residual_px to None (unconfirmed stumps)
+    del data["flags"]  # no bad_calibration flag
+    data["calibration_gt"]["residual_px"] = None
+    if "stump_confirmed" in data["calibration_gt"]:
+        del data["calibration_gt"]["stump_confirmed"]
+
+    label = validate_label(data, frame_count=30, width=500, height=500)
+    assert label.status == "final"
+    assert label.calibration_gt.stump_confirmed.bat_stump is False
+    assert label.calibration_gt.stump_confirmed.bowl_stump is False
+    assert label.calibration_gt.residual_px is None
+
+
+def test_schema_stump_confirmed_partial_and_both():
+    data = base_valid_dict()
+    data["calibration_gt"]["stump_confirmed"] = {"bat_stump": True, "bowl_stump": False}
+    data["calibration_gt"]["residual_px"] = 2.5
+    label = validate_label(data, frame_count=30, width=500, height=500)
+    assert label.calibration_gt.stump_confirmed.bat_stump is True
+    assert label.calibration_gt.stump_confirmed.bowl_stump is False
+    assert label.calibration_gt.residual_px == 2.5

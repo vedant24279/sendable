@@ -15,6 +15,8 @@ import {
   acceptSystemCalibration,
   resetCalibrationToSystem,
   clearCalibration,
+  unconfirmStump,
+  getStumpConfirmed,
   round1,
   Label,
 } from './labelModel';
@@ -193,25 +195,98 @@ describe('labelModel', () => {
       bowl_stump: [922.0, 784.0],
     };
 
-    // 1. Accept system calibration
+    // 1. Accept system calibration: copies corners, derives unconfirmed stumps, residual is null
     const accepted = acceptSystemCalibration(base, systemPoints);
     expect(accepted.calibration_gt).toBeDefined();
     expect(accepted.calibration_gt?.source).toBe('system_verified');
     expect(accepted.calibration_gt?.points.bat_L).toEqual([778.0, 434.0]);
-    expect(accepted.calibration_gt?.residual_px).toBeCloseTo(12.74, 1);
+    expect(accepted.calibration_gt?.residual_px).toBeNull();
+    expect(accepted.calibration_gt?.stump_confirmed).toEqual({ bat_stump: false, bowl_stump: false });
+    // Both stumps should be derived (not null, rounded to 1 decimal)
+    expect(accepted.calibration_gt?.points.bat_stump).toBeDefined();
+    expect(accepted.calibration_gt?.points.bowl_stump).toBeDefined();
 
-    // 2. Set one point (system_adjusted, rounds to 1 decimal)
+    // 2. Set one corner point (system_adjusted, rounds to 1 decimal, unconfirmed stumps re-derived)
     const modified = setCalibrationPoint(accepted, 'bat_L', 779.456, 435.123, systemPoints);
     expect(modified.calibration_gt?.points.bat_L).toEqual([779.5, 435.1]);
     expect(modified.calibration_gt?.source).toBe('system_adjusted');
+    expect(modified.calibration_gt?.residual_px).toBeNull();
 
-    // 3. Reset calibration back to system
+    // 3. Reset calibration back to system: copies 6 system points with both unconfirmed
     const reset = resetCalibrationToSystem(modified, systemPoints);
     expect(reset.calibration_gt?.points.bat_L).toEqual([778.0, 434.0]);
+    expect(reset.calibration_gt?.points.bat_stump).toEqual([936.0, 426.0]);
+    expect(reset.calibration_gt?.points.bowl_stump).toEqual([922.0, 784.0]);
     expect(reset.calibration_gt?.source).toBe('system_verified');
+    expect(reset.calibration_gt?.residual_px).toBeNull();
+    expect(reset.calibration_gt?.stump_confirmed).toEqual({ bat_stump: false, bowl_stump: false });
 
     // 4. Clear calibration
     const cleared = clearCalibration(reset);
     expect(cleared.calibration_gt).toBeNull();
+  });
+
+  it('moving a corner re-derives unconfirmed stumps while confirmed stumps stay put', () => {
+    const base = emptyLabel({ clip_id: 'clip_02' }, null, 'tester');
+    const systemPoints: Record<string, [number, number]> = {
+      bat_L: [778.0, 434.0],
+      bat_R: [1083.0, 430.0],
+      bowl_L: [739.0, 764.0],
+      bowl_R: [1115.0, 768.0],
+      bat_stump: [936.0, 426.0],
+      bowl_stump: [922.0, 784.0],
+    };
+
+    // 1. Accept system points -> both derived (unconfirmed)
+    const accepted = acceptSystemCalibration(base, systemPoints);
+    const initialBowlStump = accepted.calibration_gt!.points.bowl_stump;
+
+    // 2. Setting/moving a stump manually marks that stump confirmed
+    const confirmedBat = setCalibrationPoint(accepted, 'bat_stump', 940.0, 420.0, systemPoints);
+    expect(confirmedBat.calibration_gt?.stump_confirmed).toEqual({
+      bat_stump: true,
+      bowl_stump: false,
+    });
+    expect(confirmedBat.calibration_gt?.points.bat_stump).toEqual([940.0, 420.0]);
+    // Single confirmed stump calculates partial residual
+    expect(confirmedBat.calibration_gt?.residual_px).not.toBeNull();
+    expect(confirmedBat.calibration_gt?.residual_px).toBeGreaterThan(0);
+
+    // 3. Move a corner: confirmed stump stays put, unconfirmed bowl_stump re-derived
+    const movedCorner = setCalibrationPoint(confirmedBat, 'bat_L', 760.0, 440.0, systemPoints);
+    // bat_stump was confirmed, so it STAYS at 940.0, 420.0
+    expect(movedCorner.calibration_gt?.points.bat_stump).toEqual([940.0, 420.0]);
+    expect(movedCorner.calibration_gt?.stump_confirmed?.bat_stump).toBe(true);
+    // bowl_stump was unconfirmed, so its coordinates re-derived and changed
+    expect(movedCorner.calibration_gt?.stump_confirmed?.bowl_stump).toBe(false);
+    expect(movedCorner.calibration_gt?.points.bowl_stump).not.toEqual(initialBowlStump);
+
+    // 4. Unconfirm bat_stump -> snaps back to homography-predicted position, residual becomes null
+    const unconfirmed = unconfirmStump(movedCorner, 'bat_stump', systemPoints);
+    expect(unconfirmed.calibration_gt?.stump_confirmed).toEqual({
+      bat_stump: false,
+      bowl_stump: false,
+    });
+    expect(unconfirmed.calibration_gt?.points.bat_stump).not.toEqual([940.0, 420.0]);
+    expect(unconfirmed.calibration_gt?.residual_px).toBeNull();
+  });
+
+  it('defaults old labels missing stump_confirmed to false', () => {
+    const oldCalib = {
+      points: {
+        bat_L: [778.0, 434.0] as [number, number],
+        bat_R: [1083.0, 430.0] as [number, number],
+        bowl_L: [739.0, 764.0] as [number, number],
+        bowl_R: [1115.0, 768.0] as [number, number],
+        bat_stump: [936.0, 426.0] as [number, number],
+        bowl_stump: [922.0, 784.0] as [number, number],
+      },
+      source: 'system_verified' as const,
+      residual_px: 12.7,
+      updated_at: '2026-11-05T10:00:00Z',
+    };
+
+    const confirmed = getStumpConfirmed(oldCalib as any);
+    expect(confirmed).toEqual({ bat_stump: false, bowl_stump: false });
   });
 });

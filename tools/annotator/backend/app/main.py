@@ -359,11 +359,17 @@ async def save_label(clip_id: str, request: Request) -> Dict[str, Any]:
         pts = calib_gt.get("points")
         if isinstance(pts, dict):
             try:
-                fit_res = fit_homography(pts)
-                computed_res = float(fit_res.residual_px)
+                stump_conf = calib_gt.get("stump_confirmed") or {
+                    "bat_stump": False,
+                    "bowl_stump": False,
+                }
+                fit_res = fit_homography(pts, stump_confirmed=stump_conf)
+                computed_res = fit_res.residual_px
                 client_res = calib_gt.get("residual_px")
-                if client_res is None or abs(float(client_res) - computed_res) > 0.01:
-                    calib_gt["residual_px"] = computed_res
+                if computed_res is None:
+                    calib_gt["residual_px"] = None
+                elif client_res is None or abs(float(client_res) - float(computed_res)) > 0.01:
+                    calib_gt["residual_px"] = float(computed_res)
             except Exception:
                 pass
 

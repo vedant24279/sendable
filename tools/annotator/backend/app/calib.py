@@ -26,9 +26,9 @@ from app.calib_constants import (
 
 @dataclass
 class FitResult:
-    H: np.ndarray        # 3x3 float64 homography mapping image (px) -> world (m)
-    residual_px: float   # RMS pixel distance between clicked stumps and projected stump positions
-    H_inv: np.ndarray    # 3x3 float64 homography mapping world (m) -> image (px)
+    H: np.ndarray                 # 3x3 float64 homography mapping image (px) -> world (m)
+    residual_px: Optional[float]  # RMS pixel distance for confirmed stumps; None if no stump confirmed
+    H_inv: np.ndarray             # 3x3 float64 homography mapping world (m) -> image (px)
 
     def __getitem__(self, item: Union[int, str]) -> Any:
         if item == 0 or item == "H":
@@ -68,10 +68,14 @@ def invert_homography(H: np.ndarray) -> np.ndarray:
     return inv
 
 
-def fit_homography(points: Dict[str, Sequence[float]]) -> FitResult:
+def fit_homography(
+    points: Dict[str, Sequence[float]],
+    stump_confirmed: Optional[Dict[str, bool]] = None,
+) -> FitResult:
     """
     Fit an exact 4-point homography mapping image pixels (x, y) to ground world coordinates (X, Z).
-    Computes residual_px as the RMS reprojection error of the two stump positions (bat_stump, bowl_stump).
+    Computes residual_px as the RMS reprojection error over confirmed stumps only;
+    returns None if no stump is confirmed. If stump_confirmed is None, computes over both stumps.
     """
     missing = [k for k in CALIB_POINT_NAMES if k not in points]
     if missing:
@@ -129,7 +133,20 @@ def fit_homography(points: Dict[str, Sequence[float]]) -> FitResult:
     d_bat_sq = (float(clicked_bat[0]) - pred_bat_x) ** 2 + (float(clicked_bat[1]) - pred_bat_y) ** 2
     d_bowl_sq = (float(clicked_bowl[0]) - pred_bowl_x) ** 2 + (float(clicked_bowl[1]) - pred_bowl_y) ** 2
 
-    residual_px = math.sqrt((d_bat_sq + d_bowl_sq) / 2.0)
+    residual_px: Optional[float]
+    if stump_confirmed is None:
+        residual_px = math.sqrt((d_bat_sq + d_bowl_sq) / 2.0)
+    else:
+        conf_bat = bool(stump_confirmed.get("bat_stump", False))
+        conf_bowl = bool(stump_confirmed.get("bowl_stump", False))
+        if conf_bat and conf_bowl:
+            residual_px = math.sqrt((d_bat_sq + d_bowl_sq) / 2.0)
+        elif conf_bat:
+            residual_px = math.sqrt(d_bat_sq)
+        elif conf_bowl:
+            residual_px = math.sqrt(d_bowl_sq)
+        else:
+            residual_px = None
 
     return FitResult(H=H, residual_px=residual_px, H_inv=H_inv)
 
@@ -248,7 +265,7 @@ def _normalize_system_points(system_points: Any) -> Optional[Dict[str, Tuple[flo
                 res[k] = (float(v[0]), float(v[1]))
             elif isinstance(v, dict) and "x" in v and "y" in v:
                 res[k] = (float(v["x"]), float(v["y"]))
-    return res if len(res) >= 6 else None
+    return res if all(c in res for c in ("bat_L", "bat_R", "bowl_L", "bowl_R")) else None
 
 
 def classify_source(
@@ -256,16 +273,18 @@ def classify_source(
     system_points: Optional[Any],
 ) -> str:
     """
-    Classify calibration source:
+    Classify calibration source by comparing ONLY the four corner points
+    ('bat_L', 'bat_R', 'bowl_L', 'bowl_R') against system corners:
     - 'manual': when there is no system calibration available
-    - 'system_verified': when all 6 points are within 0.05 px of system points
-    - 'system_adjusted': when system points exist but one or more points differ (> 0.05 px)
+    - 'system_verified': when all 4 corners are within 0.05 px of system corners
+    - 'system_adjusted': when system corners exist but one or more corners differ (> 0.05 px)
     """
     sys_pts = _normalize_system_points(system_points)
     if not sys_pts:
         return "manual"
 
-    for name in CALIB_POINT_NAMES:
+    corners = ("bat_L", "bat_R", "bowl_L", "bowl_R")
+    for name in corners:
         if name not in points or name not in sys_pts:
             return "system_adjusted"
         px, py = float(points[name][0]), float(points[name][1])

@@ -51,11 +51,25 @@ class ImpactPoint(BaseModel):
         return self
 
 
+class StumpConfirmed(BaseModel):
+    bat_stump: bool = False
+    bowl_stump: bool = False
+
+
 class CalibrationGT(BaseModel):
     points: Dict[str, List[float]]
     source: CalibrationSource
     residual_px: Optional[float] = None
+    stump_confirmed: StumpConfirmed = Field(default_factory=StumpConfirmed)
     updated_at: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_stump_confirmed(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "stump_confirmed" not in data or data["stump_confirmed"] is None:
+                data["stump_confirmed"] = {"bat_stump": False, "bowl_stump": False}
+        return data
 
     @model_validator(mode="after")
     def validate_calib_gt(self) -> "CalibrationGT":

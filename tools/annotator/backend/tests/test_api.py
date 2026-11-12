@@ -275,6 +275,7 @@ def test_api_label_round_trip_and_atomic_write(test_env):
                 "bat_stump": [30.0, 13.2],
                 "bowl_stump": [30.0, 53.3],
             },
+            "stump_confirmed": {"bat_stump": True, "bowl_stump": True},
             "source": "system_verified",
             "residual_px": 0.0,
             "updated_at": "2026-11-05T10:00:00Z",

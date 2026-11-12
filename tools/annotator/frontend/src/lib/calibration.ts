@@ -16,7 +16,7 @@ import {
 
 export interface FitResult {
   H: number[][]; // 3x3 homography: image (px) -> world (m)
-  residual_px: number; // RMS pixel reprojection error of stump bases
+  residual_px: number | null; // RMS pixel reprojection error of confirmed stump bases; null if none confirmed
   H_inv: number[][]; // 3x3 inverse homography: world (m) -> image (px)
 }
 
@@ -118,9 +118,13 @@ export function invertHomography(H: number[][]): number[][] {
 
 /**
  * Fit an exact 4-point homography mapping image pixels (x, y) to ground world coordinates (X, Z).
- * Computes residual_px as the RMS reprojection error of the two stump positions (bat_stump, bowl_stump).
+ * Computes residual_px as the RMS reprojection error over confirmed stumps only;
+ * returns null if no stump is confirmed. If stumpConfirmed is null/undefined, computes over both stumps.
  */
-export function fitHomography(points: Record<string, [number, number]>): FitResult {
+export function fitHomography(
+  points: Record<string, [number, number]>,
+  stumpConfirmed?: { bat_stump?: boolean; bowl_stump?: boolean } | null
+): FitResult {
   for (const name of CALIB_POINT_NAMES) {
     if (!points[name]) {
       throw new Error(`Missing required calibration point: ${name}`);
@@ -168,7 +172,22 @@ export function fitHomography(points: Record<string, [number, number]>): FitResu
   const dBatSq = (clickedBatX - predBatX) ** 2 + (clickedBatY - predBatY) ** 2;
   const dBowlSq = (clickedBowlX - predBowlX) ** 2 + (clickedBowlY - predBowlY) ** 2;
 
-  const residual_px = Math.sqrt((dBatSq + dBowlSq) / 2.0);
+  let residual_px: number | null;
+  if (stumpConfirmed === undefined || stumpConfirmed === null) {
+    residual_px = Math.sqrt((dBatSq + dBowlSq) / 2.0);
+  } else {
+    const confBat = Boolean(stumpConfirmed.bat_stump);
+    const confBowl = Boolean(stumpConfirmed.bowl_stump);
+    if (confBat && confBowl) {
+      residual_px = Math.sqrt((dBatSq + dBowlSq) / 2.0);
+    } else if (confBat) {
+      residual_px = Math.sqrt(dBatSq);
+    } else if (confBowl) {
+      residual_px = Math.sqrt(dBowlSq);
+    } else {
+      residual_px = null;
+    }
+  }
 
   return { H, residual_px, H_inv };
 }
@@ -274,9 +293,10 @@ export function classifySource(
     }
   }
 
-  if (Object.keys(sysMap).length < 6) return 'manual';
+  const corners: readonly CalibrationPointName[] = ['bat_L', 'bat_R', 'bowl_L', 'bowl_R'];
+  if (!corners.every((c) => c in sysMap)) return 'manual';
 
-  for (const name of CALIB_POINT_NAMES) {
+  for (const name of corners) {
     const pt = points[name];
     const sys = sysMap[name];
     if (!pt || !sys) return 'system_adjusted';

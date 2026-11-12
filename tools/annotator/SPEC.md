@@ -309,3 +309,48 @@ Additive optional field on `Label`:
 - **Events Table Pitch Column**: Key Events table includes a `Pitch pos` column showing projected metric positions $(X, Z)\text{ m}$ for Release, Bounce, and Impact.
 - **Clip List Calibration Badge**: Clips with `calibration_gt` display a purple `C` badge in the clip list.
 - **Sorting**: Clip list supports sorting "By system residual (high to low)" based on prefill `system_residual_px`.
+
+## 10. Derived Stumps & Stump Confirmation
+
+Measurements on 79 delivery clips revealed that clicked stump points are frequently noisy (batter-end points scatter $\pm 0.5\text{ m}$ with outliers up to $2\text{ m}$; bowler-end points sit on average $0.45\text{ m}$ short; stump bases are frequently occluded by the batter or umpire), whereas the four pitch corners fit the pitch dimensions reliably.
+
+To eliminate false-positive calibration error blocks while retaining high-precision metric ground-plane homography, ground-truth calibration is **corner-driven**:
+
+### 10.1 Data Model
+`calibration_gt` includes an additive field `stump_confirmed`:
+```json
+{
+  "calibration_gt": {
+    "points": { ... },
+    "source": "system_verified | system_adjusted | manual",
+    "residual_px": null,
+    "stump_confirmed": {
+      "bat_stump": false,
+      "bowl_stump": false
+    },
+    "updated_at": "ISO-8601 string"
+  }
+}
+```
+- **Old Label Compatibility**: When `stump_confirmed` is omitted (or loaded from legacy schema v1 labels), both stumps default to `false`.
+
+### 10.2 Dynamic Stump Derivation & Confirmation
+- **Homography Fitting**: Homography matrix $H$ is computed strictly from the 4 corner landmarks (`bat_L`, `bat_R`, `bowl_L`, `bowl_R`).
+- **Unconfirmed (Derived) Stumps**: When a stump is unconfirmed, its coordinates automatically track the exact homography prediction:
+  - `bat_stump = round1(world_to_pixel(H, 0.0, 0.0))`
+  - `bowl_stump = round1(world_to_pixel(H, 0.0, 20.12))`
+  Moving, nudging, or resetting any corner automatically re-derives all unconfirmed stumps.
+- **Stump Confirmation**: Manually placing, dragging, or nudging a stump handle marks that stump as `confirmed` (`stump_confirmed[name] = true`). A confirmed stump retains its clicked location when pitch corners are adjusted.
+- **Unconfirm Action**: Each stump row in `CalibrationPanel` provides an "Unconfirm (derive again)" button that snaps the stump back to the homography projection and marks it unconfirmed.
+
+### 10.3 Residual Calculation
+- `residual_px` is computed as the RMS reprojection error **over confirmed stumps only**:
+  - Both confirmed: $\text{residual\_px} = \sqrt{(d_{\text{bat}}^2 + d_{\text{bowl}}^2) / 2}$
+  - One confirmed: $\text{residual\_px} = d_{\text{confirmed}}$
+  - Neither confirmed: $\text{residual\_px} = \text{null}$
+- **Validation Rules**: `CALIB_WARN_PX` and `CALIB_ERROR_PX` thresholds apply strictly when `residual_px` is non-null. When no stump is confirmed, `residual_px: null` allows finalizing without artificial residual blocks.
+
+### 10.4 System Calibration Actions & Source Classification
+- **Accept system calibration**: Copies the 4 system corners and derives both stumps with `stump_confirmed = { bat_stump: false, bowl_stump: false }`.
+- **Reset to system**: Copies all six system points with both stumps unconfirmed (`stump_confirmed = { bat_stump: false, bowl_stump: false }`).
+- **Source Classification**: Compares **only the 4 corner points** against system points. Moving or deriving stump points does not alter the source classification between `system_verified` and `system_adjusted`.

@@ -15,8 +15,25 @@ describe('calibration geometry & parity', () => {
     const pts = golden.points as unknown as Record<string, [number, number]>;
     const res = fitHomography(pts);
 
-    // 1. Residual parity
-    expect(Math.abs(res.residual_px - golden.expected_residual_px)).toBeLessThan(1e-3);
+    // 1. Residual parity (default calculates over both stumps)
+    expect(res.residual_px).not.toBeNull();
+    expect(Math.abs(res.residual_px! - golden.expected_residual_px)).toBeLessThan(1e-3);
+
+    // 1b. stumpConfirmed parity: both, bat-only, bowl-only, none
+    const resBoth = fitHomography(pts, { bat_stump: true, bowl_stump: true });
+    expect(resBoth.residual_px).not.toBeNull();
+    expect(Math.abs(resBoth.residual_px! - golden.expected_residual_px)).toBeLessThan(1e-3);
+
+    const resBatOnly = fitHomography(pts, { bat_stump: true, bowl_stump: false });
+    expect(resBatOnly.residual_px).not.toBeNull();
+    expect(Math.abs(resBatOnly.residual_px! - golden.expected_residual_px_bat_only)).toBeLessThan(1e-3);
+
+    const resBowlOnly = fitHomography(pts, { bat_stump: false, bowl_stump: true });
+    expect(resBowlOnly.residual_px).not.toBeNull();
+    expect(Math.abs(resBowlOnly.residual_px! - golden.expected_residual_px_bowl_only)).toBeLessThan(1e-3);
+
+    const resNone = fitHomography(pts, { bat_stump: false, bowl_stump: false });
+    expect(resNone.residual_px).toBeNull();
 
     // 2. Homography matrix parity
     for (let r = 0; r < 3; r++) {
@@ -91,7 +108,11 @@ describe('calibration geometry & parity', () => {
     const sysVerified = { ...pts };
     expect(classifySource(pts, sysVerified)).toBe('system_verified');
 
-    // System adjusted when any point differs > 0.05 px
+    // System verified even if stumps differ (source classification only compares 4 corners)
+    const stumpDiffer = { ...pts, bat_stump: [950.0, 440.0] as [number, number] };
+    expect(classifySource(stumpDiffer, pts)).toBe('system_verified');
+
+    // System adjusted when any corner differs > 0.05 px
     const sysAdjusted = { ...pts, bat_L: [778.1, 434.0] as [number, number] };
     expect(classifySource(pts, sysAdjusted)).toBe('system_adjusted');
   });

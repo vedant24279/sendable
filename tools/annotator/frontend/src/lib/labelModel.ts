@@ -7,8 +7,9 @@ import { PrefillData } from '../api';
 import {
   CalibrationPointName,
   CALIB_POINT_NAMES,
+  WORLD_CALIB_POINTS,
 } from './calibConstants';
-import { fitHomography, classifySource } from './calibration';
+import { fitHomography, classifySource, worldToPixel } from './calibration';
 
 export type BallColour = 'white' | 'red' | 'pink';
 export type BatterHand = 'right' | 'left';
@@ -40,10 +41,16 @@ export interface ImpactPoint {
   y?: number | null;
 }
 
+export interface StumpConfirmed {
+  bat_stump: boolean;
+  bowl_stump: boolean;
+}
+
 export interface CalibrationGT {
   points: Record<CalibrationPointName, [number, number]>;
   source: CalibrationSource;
   residual_px: number | null;
+  stump_confirmed?: StumpConfirmed;
   updated_at: string;
 }
 
@@ -449,9 +456,52 @@ function normalizeSystemPoints(
   return map as Record<CalibrationPointName, [number, number]>;
 }
 
+export function getStumpConfirmed(calibGT?: CalibrationGT | null): StumpConfirmed {
+  return {
+    bat_stump: Boolean(calibGT?.stump_confirmed?.bat_stump),
+    bowl_stump: Boolean(calibGT?.stump_confirmed?.bowl_stump),
+  };
+}
+
+/**
+ * If the 4 corners are present, compute H and recompute any unconfirmed stumps to predicted positions.
+ */
+export function deriveUnconfirmedStumps(
+  points: Record<CalibrationPointName, [number, number]>,
+  stumpConfirmed: StumpConfirmed
+): Record<CalibrationPointName, [number, number]> {
+  const corners: readonly CalibrationPointName[] = ['bat_L', 'bat_R', 'bowl_L', 'bowl_R'];
+  if (!corners.every((c) => points[c] && points[c].length === 2)) {
+    return points;
+  }
+
+  try {
+    const fit = fitHomography(points, stumpConfirmed);
+    const updated = { ...points };
+
+    if (!stumpConfirmed.bat_stump) {
+      const [wX, wZ] = WORLD_CALIB_POINTS.bat_stump;
+      const [px, py] = worldToPixel(fit.H, wX, wZ, fit.H_inv);
+      updated.bat_stump = [round1(px), round1(py)];
+    }
+
+    if (!stumpConfirmed.bowl_stump) {
+      const [wX, wZ] = WORLD_CALIB_POINTS.bowl_stump;
+      const [px, py] = worldToPixel(fit.H, wX, wZ, fit.H_inv);
+      updated.bowl_stump = [round1(px), round1(py)];
+    }
+
+    return updated;
+  } catch {
+    return points;
+  }
+}
+
 /**
  * Sets one calibration point coordinate, rounding x and y to 1 decimal place.
  * Recomputes source and residual_px.
+ * When a corner changes, recomputes unconfirmed stumps.
+ * Placing/moving a stump marks it confirmed.
  */
 export function setCalibrationPoint(
   label: Label,
@@ -470,10 +520,20 @@ export function setCalibrationPoint(
     normSys ??
     ({} as Record<CalibrationPointName, [number, number]>);
 
-  const updatedPoints: Record<CalibrationPointName, [number, number]> = {
+  const isStump = name === 'bat_stump' || name === 'bowl_stump';
+  const existingConfirmed = getStumpConfirmed(label.calibration_gt);
+  const updatedConfirmed: StumpConfirmed = isStump
+    ? { ...existingConfirmed, [name]: true }
+    : existingConfirmed;
+
+  let updatedPoints: Record<CalibrationPointName, [number, number]> = {
     ...existingPoints,
     [name]: [round1(x), round1(y)],
   };
+
+  if (!isStump) {
+    updatedPoints = deriveUnconfirmedStumps(updatedPoints, updatedConfirmed);
+  }
 
   let residual_px: number | null = null;
   const allPresent = CALIB_POINT_NAMES.every(
@@ -481,7 +541,7 @@ export function setCalibrationPoint(
   );
   if (allPresent) {
     try {
-      const fit = fitHomography(updatedPoints);
+      const fit = fitHomography(updatedPoints, updatedConfirmed);
       residual_px = fit.residual_px;
     } catch {
       residual_px = null;
@@ -497,6 +557,53 @@ export function setCalibrationPoint(
       points: updatedPoints,
       source,
       residual_px,
+      stump_confirmed: updatedConfirmed,
+      updated_at: now,
+    },
+    mode: nextMode(label.mode, ctx),
+    updated_at: now,
+  };
+}
+
+/**
+ * Unconfirms a stump and re-derives its position from the homography.
+ */
+export function unconfirmStump(
+  label: Label,
+  stumpName: 'bat_stump' | 'bowl_stump',
+  systemPoints?:
+    | Record<string, [number, number]>
+    | Array<{ name: string; x: number; y: number }>
+    | null,
+  ctx?: EditContext
+): Label {
+  if (!label.calibration_gt) return label;
+  const currentConfirmed = getStumpConfirmed(label.calibration_gt);
+  const updatedConfirmed: StumpConfirmed = {
+    ...currentConfirmed,
+    [stumpName]: false,
+  };
+
+  const updatedPoints = deriveUnconfirmedStumps(label.calibration_gt.points, updatedConfirmed);
+
+  let residual_px: number | null = null;
+  try {
+    const fit = fitHomography(updatedPoints, updatedConfirmed);
+    residual_px = fit.residual_px;
+  } catch {
+    residual_px = null;
+  }
+
+  const source = classifySource(updatedPoints, systemPoints);
+  const now = new Date().toISOString();
+
+  return {
+    ...label,
+    calibration_gt: {
+      points: updatedPoints,
+      source,
+      residual_px,
+      stump_confirmed: updatedConfirmed,
       updated_at: now,
     },
     mode: nextMode(label.mode, ctx),
@@ -520,11 +627,19 @@ export function clearCalibrationPoint(
   const newPoints = { ...label.calibration_gt.points } as Record<string, [number, number]>;
   delete newPoints[name];
 
+  const currentConfirmed = getStumpConfirmed(label.calibration_gt);
+  const updatedConfirmed: StumpConfirmed =
+    name === 'bat_stump'
+      ? { ...currentConfirmed, bat_stump: false }
+      : name === 'bowl_stump'
+      ? { ...currentConfirmed, bowl_stump: false }
+      : currentConfirmed;
+
   let residual_px: number | null = null;
   const allPresent = CALIB_POINT_NAMES.every((k) => newPoints[k]);
   if (allPresent) {
     try {
-      const fit = fitHomography(newPoints as Record<CalibrationPointName, [number, number]>);
+      const fit = fitHomography(newPoints as Record<CalibrationPointName, [number, number]>, updatedConfirmed);
       residual_px = fit.residual_px;
     } catch {
       residual_px = null;
@@ -543,6 +658,7 @@ export function clearCalibrationPoint(
       points: newPoints as Record<CalibrationPointName, [number, number]>,
       source,
       residual_px,
+      stump_confirmed: updatedConfirmed,
       updated_at: now,
     },
     mode: nextMode(label.mode, ctx),
@@ -551,7 +667,7 @@ export function clearCalibrationPoint(
 }
 
 /**
- * Accepts system calibration points, setting source to "system_verified".
+ * Accepts system calibration points: copies the four system CORNERS and derives both stumps (unconfirmed).
  */
 export function acceptSystemCalibration(
   label: Label,
@@ -568,22 +684,32 @@ export function acceptSystemCalibration(
     );
   }
 
-  let residual_px: number | null = null;
-  try {
-    const fit = fitHomography(normSys);
-    residual_px = fit.residual_px;
-  } catch {
-    residual_px = null;
+  const corners: readonly CalibrationPointName[] = ['bat_L', 'bat_R', 'bowl_L', 'bowl_R'];
+  if (!corners.every((c) => normSys[c])) {
+    throw new Error('Missing system corner points');
   }
 
+  const stumpConfirmed: StumpConfirmed = { bat_stump: false, bowl_stump: false };
+  const basePoints: Record<CalibrationPointName, [number, number]> = {
+    bat_L: normSys.bat_L,
+    bat_R: normSys.bat_R,
+    bowl_L: normSys.bowl_L,
+    bowl_R: normSys.bowl_R,
+    bat_stump: normSys.bat_stump ?? [0, 0],
+    bowl_stump: normSys.bowl_stump ?? [0, 0],
+  };
+
+  const derivedPoints = deriveUnconfirmedStumps(basePoints, stumpConfirmed);
+  const source = classifySource(derivedPoints, systemPoints);
   const now = new Date().toISOString();
 
   return {
     ...label,
     calibration_gt: {
-      points: normSys,
-      source: 'system_verified',
-      residual_px,
+      points: derivedPoints,
+      source,
+      residual_px: null,
+      stump_confirmed: stumpConfirmed,
       updated_at: now,
     },
     mode: nextMode(label.mode, ctx),
@@ -592,7 +718,7 @@ export function acceptSystemCalibration(
 }
 
 /**
- * Resets calibration to system calibration points.
+ * Resets calibration to system calibration points: copies all six system points with both unconfirmed.
  */
 export function resetCalibrationToSystem(
   label: Label,
@@ -602,7 +728,29 @@ export function resetCalibrationToSystem(
     | null,
   ctx?: EditContext
 ): Label {
-  return acceptSystemCalibration(label, systemPoints, ctx);
+  const normSys = normalizeSystemPoints(systemPoints);
+  if (!normSys) {
+    throw new Error(
+      'Cannot reset to system calibration: missing or incomplete system calibration points'
+    );
+  }
+
+  const stumpConfirmed: StumpConfirmed = { bat_stump: false, bowl_stump: false };
+  const source = classifySource(normSys, systemPoints);
+  const now = new Date().toISOString();
+
+  return {
+    ...label,
+    calibration_gt: {
+      points: { ...normSys },
+      source,
+      residual_px: null,
+      stump_confirmed: stumpConfirmed,
+      updated_at: now,
+    },
+    mode: nextMode(label.mode, ctx),
+    updated_at: now,
+  };
 }
 
 /**

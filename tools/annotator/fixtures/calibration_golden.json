@@ -61,6 +61,9 @@
     ]
   ],
   "expected_residual_px": 12.736404488671573,
+  "expected_residual_px_bat_only": 14.219270885403244,
+  "expected_residual_px_bowl_only": 11.056415969274605,
+  "expected_residual_px_none": null,
   "test_pixels": [
     {
       "pixel": [

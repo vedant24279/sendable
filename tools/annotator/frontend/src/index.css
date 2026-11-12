@@ -1454,6 +1454,33 @@ kbd {
   flex-direction: column;
 }
 
+.point-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.stump-status-pill {
+  font-size: 0.62rem;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.pill-derived {
+  background-color: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+}
+
+.pill-confirmed {
+  background-color: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  color: #4ade80;
+}
+
 .point-code {
   font-weight: 600;
   color: #f1f5f9;
@@ -1492,6 +1519,19 @@ kbd {
 .btn-go {
   color: #38bdf8;
   border-color: #0284c7;
+}
+
+.btn-unconfirm {
+  color: #94a3b8;
+  border-color: #475569;
+  font-size: 0.65rem;
+  padding: 1px 5px;
+}
+
+.btn-unconfirm:hover:not(:disabled) {
+  color: #f1f5f9;
+  border-color: #64748b;
+  background-color: #334155;
 }
 
 .btn-clear {

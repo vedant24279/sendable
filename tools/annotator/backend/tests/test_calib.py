@@ -53,6 +53,19 @@ def test_golden_fixture_parity(golden_fixture):
         assert abs(px - item["expected_pixel"][0]) < 1e-3
         assert abs(py - item["expected_pixel"][1]) < 1e-3
 
+    # 5. stump_confirmed parity: both, bat-only, bowl-only, none
+    res_both = fit_homography(pts, stump_confirmed={"bat_stump": True, "bowl_stump": True})
+    assert abs(res_both.residual_px - golden_fixture["expected_residual_px"]) < 1e-3
+
+    res_bat_only = fit_homography(pts, stump_confirmed={"bat_stump": True, "bowl_stump": False})
+    assert abs(res_bat_only.residual_px - golden_fixture["expected_residual_px_bat_only"]) < 1e-3
+
+    res_bowl_only = fit_homography(pts, stump_confirmed={"bat_stump": False, "bowl_stump": True})
+    assert abs(res_bowl_only.residual_px - golden_fixture["expected_residual_px_bowl_only"]) < 1e-3
+
+    res_none = fit_homography(pts, stump_confirmed={"bat_stump": False, "bowl_stump": False})
+    assert res_none.residual_px is None
+
 
 def test_golden_fixture_stump_world_errors(golden_fixture):
     pts = golden_fixture["points"]
@@ -113,7 +126,12 @@ def test_classify_source():
     sys_ver["bat_L"][0] += 0.03
     assert classify_source(pts, sys_ver) == "system_verified"
 
-    # Exceeding 0.05 px
+    # System verified even if stumps differ (source classification only compares 4 corners)
+    sys_stump_differ = {k: list(v) for k, v in pts.items()}
+    sys_stump_differ["bat_stump"] = [950.0, 440.0]
+    assert classify_source(pts, sys_stump_differ) == "system_verified"
+
+    # Exceeding 0.05 px on corner
     sys_adj = {k: list(v) for k, v in pts.items()}
     sys_adj["bat_L"][0] += 0.06
     assert classify_source(pts, sys_adj) == "system_adjusted"

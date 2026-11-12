@@ -8,6 +8,8 @@ import {
   resetCalibrationToSystem,
   clearCalibration,
   clearCalibrationPoint,
+  getStumpConfirmed,
+  unconfirmStump,
 } from '../lib/labelModel';
 import {
   CALIB_POINT_NAMES,
@@ -35,6 +37,7 @@ export const CalibrationPanel: FC = () => {
   const points = calibGT?.points || ({} as Record<CalibrationPointName, [number, number]>);
   const source = calibGT?.source || 'none';
   const residual = calibGT?.residual_px;
+  const stumpConfirmed = getStumpConfirmed(calibGT);
 
   // Residual color class
   const residualClass = useMemo(() => {
@@ -43,6 +46,17 @@ export const CalibrationPanel: FC = () => {
     if (residual <= CALIB_ERROR_PX) return 'residual-warn';
     return 'residual-error';
   }, [residual]);
+
+  // Residual display text
+  const residualText = useMemo(() => {
+    if (residual == null) {
+      return 'n/a (no confirmed stump)';
+    }
+    const confirmedList: string[] = [];
+    if (stumpConfirmed.bat_stump) confirmedList.push('bat');
+    if (stumpConfirmed.bowl_stump) confirmedList.push('bowl');
+    return `${residual.toFixed(1)} px (confirmed: ${confirmedList.join(', ')})`;
+  }, [residual, stumpConfirmed]);
 
   // Compute Stump check Z coordinates via homography (Amendment D)
   const stumpCheck = useMemo(() => {
@@ -98,6 +112,12 @@ export const CalibrationPanel: FC = () => {
     );
   };
 
+  const handleUnconfirmStump = (stumpName: 'bat_stump' | 'bowl_stump') => {
+    apply((prev) =>
+      unconfirmStump(prev, stumpName, prefill?.calibration, { ghostVisible })
+    );
+  };
+
   const handleGoToPoint = (name: CalibrationPointName) => {
     setSelectedCalibPoint(name);
     const pt = points[name];
@@ -131,10 +151,7 @@ export const CalibrationPanel: FC = () => {
             Source: <strong>{source}</strong>
           </span>
           <span className={`calib-residual-badge ${residualClass}`}>
-            Stump residual:{' '}
-            <strong>
-              {residual != null ? `${residual.toFixed(1)} px` : '—'}
-            </strong>
+            Stump residual: <strong>{residualText}</strong>
           </span>
         </div>
       </div>
@@ -181,6 +198,8 @@ export const CalibrationPanel: FC = () => {
               const isSelected = selectedCalibPoint === name;
               const color = CALIB_HANDLE_COLORS[name];
               const labelText = CALIB_POINT_LABELS[name];
+              const isStump = name === 'bat_stump' || name === 'bowl_stump';
+              const isConfirmed = isStump && Boolean(stumpConfirmed[name]);
 
               return (
                 <tr
@@ -194,7 +213,23 @@ export const CalibrationPanel: FC = () => {
                       style={{ backgroundColor: color }}
                     />
                     <div className="point-text-wrap">
-                      <span className="point-code">{name}</span>
+                      <div className="point-title-row">
+                        <span className="point-code">{name}</span>
+                        {isStump && (
+                          <span
+                            className={`stump-status-pill ${
+                              isConfirmed ? 'pill-confirmed' : 'pill-derived'
+                            }`}
+                            title={
+                              isConfirmed
+                                ? 'Stump confirmed from visible base'
+                                : 'Stump derived automatically from homography'
+                            }
+                          >
+                            {isConfirmed ? 'confirmed' : 'derived'}
+                          </span>
+                        )}
+                      </div>
                       <span className="point-desc">{labelText}</span>
                     </div>
                   </td>
@@ -210,6 +245,16 @@ export const CalibrationPanel: FC = () => {
                     >
                       Go
                     </button>
+                    {isStump && isConfirmed && (
+                      <button
+                        className="btn-tiny btn-unconfirm"
+                        disabled={!pt}
+                        onClick={() => handleUnconfirmStump(name)}
+                        title="Unconfirm and derive from homography again"
+                      >
+                        Unconfirm (derive again)
+                      </button>
+                    )}
                     <button
                       className="btn-tiny btn-clear"
                       disabled={!pt}
@@ -254,12 +299,11 @@ export const CalibrationPanel: FC = () => {
         </button>
       </div>
 
-      {/* Hints (Amendment B) */}
+      {/* Hints */}
       <div className="calib-hints-box">
         <p className="hint-line">
-          💡 <strong>Hint:</strong> Click the ground point directly below the middle
-          stump. If the base is hidden by the batter, use the visible part of the
-          stumps and go straight down to the ground.
+          💡 <strong>Hint:</strong> Confirm a stump only if its base is visible;
+          otherwise leave it derived.
         </p>
         <p className="hint-line">
           🎥 Check the first and last frame; if the grid leaves the painted
