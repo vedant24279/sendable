@@ -4,6 +4,11 @@
  */
 
 import { PrefillData } from '../api';
+import {
+  CalibrationPointName,
+  CALIB_POINT_NAMES,
+} from './calibConstants';
+import { fitHomography, classifySource } from './calibration';
 
 export type BallColour = 'white' | 'red' | 'pink';
 export type BatterHand = 'right' | 'left';
@@ -20,6 +25,7 @@ export type LabelFlag = 'ball_not_visible' | 'camera_moved' | 'bad_calibration' 
 export type LabelStatus = 'draft' | 'final' | 'flagged';
 export type LabelMode = 'assisted' | 'blind';
 export type SplitType = 'dev' | 'final';
+export type CalibrationSource = 'system_verified' | 'system_adjusted' | 'manual';
 
 export interface Point {
   frame: number;
@@ -32,6 +38,13 @@ export interface ImpactPoint {
   frame?: number | null;
   x?: number | null;
   y?: number | null;
+}
+
+export interface CalibrationGT {
+  points: Record<CalibrationPointName, [number, number]>;
+  source: CalibrationSource;
+  residual_px: number | null;
+  updated_at: string;
 }
 
 export interface Label {
@@ -52,6 +65,7 @@ export interface Label {
   impact: ImpactPoint | null;
   last_visible_frame: number | null;
   lbw: LBWDecision | null;
+  calibration_gt: CalibrationGT | null;
   flags: LabelFlag[];
   notes: string;
 }
@@ -126,6 +140,7 @@ export function emptyLabel(
     impact: null,
     last_visible_frame: null,
     lbw: null,
+    calibration_gt: null,
     flags: [],
     notes: '',
   };
@@ -400,6 +415,158 @@ export function adoptSystemEvents(
     release,
     bounce,
     mode: 'assisted',
+    updated_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Helper to normalize systemPoints into a Record<CalibrationPointName, [number, number]>
+ */
+function normalizeSystemPoints(
+  systemPoints?:
+    | Record<string, [number, number]>
+    | Array<{ name: string; x: number; y: number }>
+    | null
+): Record<CalibrationPointName, [number, number]> | null {
+  if (!systemPoints) return null;
+  const map: Partial<Record<CalibrationPointName, [number, number]>> = {};
+  if (Array.isArray(systemPoints)) {
+    for (const item of systemPoints) {
+      if (item && item.name && typeof item.x === 'number' && typeof item.y === 'number') {
+        map[item.name as CalibrationPointName] = [round1(item.x), round1(item.y)];
+      }
+    }
+  } else {
+    for (const [k, v] of Object.entries(systemPoints)) {
+      if (Array.isArray(v) && v.length >= 2) {
+        map[k as CalibrationPointName] = [round1(v[0]), round1(v[1])];
+      }
+    }
+  }
+  for (const name of CALIB_POINT_NAMES) {
+    if (!map[name]) return null;
+  }
+  return map as Record<CalibrationPointName, [number, number]>;
+}
+
+/**
+ * Sets one calibration point coordinate, rounding x and y to 1 decimal place.
+ * Recomputes source and residual_px.
+ */
+export function setCalibrationPoint(
+  label: Label,
+  name: CalibrationPointName,
+  x: number,
+  y: number,
+  systemPoints?:
+    | Record<string, [number, number]>
+    | Array<{ name: string; x: number; y: number }>
+    | null,
+  ctx?: EditContext
+): Label {
+  const normSys = normalizeSystemPoints(systemPoints);
+  const existingPoints =
+    label.calibration_gt?.points ??
+    normSys ??
+    ({} as Record<CalibrationPointName, [number, number]>);
+
+  const updatedPoints: Record<CalibrationPointName, [number, number]> = {
+    ...existingPoints,
+    [name]: [round1(x), round1(y)],
+  };
+
+  let residual_px: number | null = null;
+  const allPresent = CALIB_POINT_NAMES.every(
+    (k) => updatedPoints[k] && updatedPoints[k].length === 2
+  );
+  if (allPresent) {
+    try {
+      const fit = fitHomography(updatedPoints);
+      residual_px = fit.residual_px;
+    } catch {
+      residual_px = null;
+    }
+  }
+
+  const source = classifySource(updatedPoints, systemPoints);
+  const now = new Date().toISOString();
+
+  return {
+    ...label,
+    calibration_gt: {
+      points: updatedPoints,
+      source,
+      residual_px,
+      updated_at: now,
+    },
+    mode: nextMode(label.mode, ctx),
+    updated_at: now,
+  };
+}
+
+/**
+ * Accepts system calibration points, setting source to "system_verified".
+ */
+export function acceptSystemCalibration(
+  label: Label,
+  systemPoints?:
+    | Record<string, [number, number]>
+    | Array<{ name: string; x: number; y: number }>
+    | null,
+  ctx?: EditContext
+): Label {
+  const normSys = normalizeSystemPoints(systemPoints);
+  if (!normSys) {
+    throw new Error(
+      'Cannot accept system calibration: missing or incomplete system calibration points'
+    );
+  }
+
+  let residual_px: number | null = null;
+  try {
+    const fit = fitHomography(normSys);
+    residual_px = fit.residual_px;
+  } catch {
+    residual_px = null;
+  }
+
+  const now = new Date().toISOString();
+
+  return {
+    ...label,
+    calibration_gt: {
+      points: normSys,
+      source: 'system_verified',
+      residual_px,
+      updated_at: now,
+    },
+    mode: nextMode(label.mode, ctx),
+    updated_at: now,
+  };
+}
+
+/**
+ * Resets calibration to system calibration points.
+ */
+export function resetCalibrationToSystem(
+  label: Label,
+  systemPoints?:
+    | Record<string, [number, number]>
+    | Array<{ name: string; x: number; y: number }>
+    | null,
+  ctx?: EditContext
+): Label {
+  return acceptSystemCalibration(label, systemPoints, ctx);
+}
+
+/**
+ * Clears calibration from label (sets calibration_gt to null).
+ */
+export function clearCalibration(label: Label, ctx?: EditContext): Label {
+  return {
+    ...label,
+    calibration_gt: null,
+    mode: nextMode(label.mode, ctx),
     updated_at: new Date().toISOString(),
   };
 }

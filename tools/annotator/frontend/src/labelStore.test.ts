@@ -251,7 +251,27 @@ describe('useLabelStore', () => {
 
     // Set up a complete label that has a warning (release frame > 20)
     useLabelStore.getState().apply((prev) => {
-      let l: Label = { ...prev, ball_colour: 'white', batter_hand: 'right' };
+      let l: Label = {
+        ...prev,
+        split: 'dev',
+        ball_colour: 'white',
+        batter_hand: 'right',
+        bowler_type: 'pace',
+        lighting: 'bright',
+        calibration_gt: {
+          points: {
+            bat_L: [778.0, 434.0],
+            bat_R: [1083.0, 430.0],
+            bowl_L: [739.0, 764.0],
+            bowl_R: [1115.0, 768.0],
+            bat_stump: [936.0, 426.0],
+            bowl_stump: [922.0, 784.0],
+          },
+          source: 'system_verified',
+          residual_px: 2.5,
+          updated_at: new Date().toISOString(),
+        },
+      };
       l = placeEvent(l, 'release', 22, 800, 400, { ghostVisible: false }); // triggers release > 20 warning
       l = placeEvent(l, 'bounce', 30, 850, 500, { ghostVisible: false });
       l = setImpactType(l, 'bat');

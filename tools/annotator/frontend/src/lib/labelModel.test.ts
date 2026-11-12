@@ -11,6 +11,10 @@ import {
   setNotes,
   setSplit,
   adoptSystemEvents,
+  setCalibrationPoint,
+  acceptSystemCalibration,
+  resetCalibrationToSystem,
+  clearCalibration,
   round1,
   Label,
 } from './labelModel';
@@ -174,5 +178,40 @@ describe('labelModel', () => {
 
     l = setMeta(l, 'batter_hand', 'left');
     expect(l.batter_hand).toBe('left');
+  });
+
+  it('handles calibration pure functions (accept, setPoint, reset, clear)', () => {
+    const base = emptyLabel({ clip_id: 'clip_01' }, null, 'tester');
+    expect(base.calibration_gt).toBeNull();
+
+    const systemPoints: Record<string, [number, number]> = {
+      bat_L: [778.0, 434.0],
+      bat_R: [1083.0, 430.0],
+      bowl_L: [739.0, 764.0],
+      bowl_R: [1115.0, 768.0],
+      bat_stump: [936.0, 426.0],
+      bowl_stump: [922.0, 784.0],
+    };
+
+    // 1. Accept system calibration
+    const accepted = acceptSystemCalibration(base, systemPoints);
+    expect(accepted.calibration_gt).toBeDefined();
+    expect(accepted.calibration_gt?.source).toBe('system_verified');
+    expect(accepted.calibration_gt?.points.bat_L).toEqual([778.0, 434.0]);
+    expect(accepted.calibration_gt?.residual_px).toBeCloseTo(12.74, 1);
+
+    // 2. Set one point (system_adjusted, rounds to 1 decimal)
+    const modified = setCalibrationPoint(accepted, 'bat_L', 779.456, 435.123, systemPoints);
+    expect(modified.calibration_gt?.points.bat_L).toEqual([779.5, 435.1]);
+    expect(modified.calibration_gt?.source).toBe('system_adjusted');
+
+    // 3. Reset calibration back to system
+    const reset = resetCalibrationToSystem(modified, systemPoints);
+    expect(reset.calibration_gt?.points.bat_L).toEqual([778.0, 434.0]);
+    expect(reset.calibration_gt?.source).toBe('system_verified');
+
+    // 4. Clear calibration
+    const cleared = clearCalibration(reset);
+    expect(cleared.calibration_gt).toBeNull();
   });
 });

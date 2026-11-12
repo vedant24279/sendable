@@ -23,6 +23,19 @@ def base_valid_dict() -> dict:
         "impact": {"type": "bat", "frame": 18, "x": 180.0, "y": 220.0},
         "last_visible_frame": 25,
         "lbw": None,
+        "calibration_gt": {
+            "points": {
+                "bat_L": [150.0, 100.0],
+                "bat_R": [350.0, 100.0],
+                "bowl_L": [100.0, 400.0],
+                "bowl_R": [400.0, 400.0],
+                "bat_stump": [250.0, 86.5],
+                "bowl_stump": [250.0, 432.2],
+            },
+            "source": "system_verified",
+            "residual_px": 0.0,
+            "updated_at": "2026-11-05T10:00:00Z",
+        },
         "flags": ["bad_calibration"],
         "notes": "Good delivery",
     }
@@ -187,6 +200,94 @@ def test_schema_final_status_mandatory_fields():
     data["annotator"] = ""
     with pytest.raises((ValidationError, ValueError), match="annotator is required"):
         validate_label(data)
+
+    # Missing calibration_gt
+    data = base_valid_dict()
+    data["calibration_gt"] = None
+    with pytest.raises((ValidationError, ValueError), match="calibration_gt is required"):
+        validate_label(data)
+
+    # Missing split
+    data = base_valid_dict()
+    data["split"] = None
+    with pytest.raises((ValidationError, ValueError), match="split is required"):
+        validate_label(data)
+
+    # Missing bowler_type
+    data = base_valid_dict()
+    data["bowler_type"] = None
+    with pytest.raises((ValidationError, ValueError), match="bowler_type is required"):
+        validate_label(data)
+
+    # Missing lighting
+    data = base_valid_dict()
+    data["lighting"] = None
+    with pytest.raises((ValidationError, ValueError), match="lighting is required"):
+        validate_label(data)
+
+    # Missing lbw when impact.type == 'pad'
+    data = base_valid_dict()
+    data["impact"]["type"] = "pad"
+    data["lbw"] = None
+    with pytest.raises((ValidationError, ValueError), match="lbw is required for status 'final' when impact.type is 'pad'"):
+        validate_label(data)
+
+    # Valid when lbw is supplied for pad impact
+    data["lbw"] = "out"
+    valid_pad = validate_label(data)
+    assert valid_pad.lbw == "out"
+
+
+def test_schema_calibration_rules():
+    # Residual > CALIB_ERROR_PX (12.0)
+    data = base_valid_dict()
+    data["calibration_gt"]["residual_px"] = 14.5
+    with pytest.raises((ValidationError, ValueError), match="exceeds CALIB_ERROR_PX"):
+        validate_label(data)
+
+    # Non-convex quad
+    data = base_valid_dict()
+    data["calibration_gt"]["points"]["bowl_L"] = [450.0, 400.0]
+    data["calibration_gt"]["points"]["bowl_R"] = [50.0, 400.0]  # inverted
+    with pytest.raises((ValidationError, ValueError), match="strictly convex"):
+        validate_label(data, width=500, height=500)
+
+    # Area < 2% of frame area (500*500*0.02 = 5000 px^2)
+    data = base_valid_dict()
+    data["calibration_gt"]["points"] = {
+        "bat_L": [10.0, 10.0],
+        "bat_R": [20.0, 10.0],
+        "bowl_R": [20.0, 20.0],
+        "bowl_L": [10.0, 20.0],
+        "bat_stump": [15.0, 10.0],
+        "bowl_stump": [15.0, 20.0],
+    }
+    with pytest.raises((ValidationError, ValueError), match="must be > 2%"):
+        validate_label(data, width=500, height=500)
+
+    # Horizontal order violation bat_L.x >= bat_R.x
+    data = base_valid_dict()
+    data["calibration_gt"]["points"]["bat_L"] = [360.0, 100.0]
+    with pytest.raises((ValidationError, ValueError), match="strictly less than"):
+        validate_label(data, width=500, height=500)
+
+
+def test_old_label_compatibility_without_calibration():
+    # Existing label without calibration_gt loads as draft without issues
+    old_label = {
+        "schema_version": 1,
+        "clip_id": "legacy_clip_01",
+        "split": "dev",
+        "annotator": "bob",
+        "mode": "blind",
+        "status": "draft",
+        "created_at": "2026-11-01T10:00:00Z",
+        "updated_at": "2026-11-01T10:00:00Z",
+        "notes": "Legacy draft",
+    }
+    label = validate_label(old_label)
+    assert label.status == "draft"
+    assert label.calibration_gt is None
 
 
 def test_schema_bounds_validation():

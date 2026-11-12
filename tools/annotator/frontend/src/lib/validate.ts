@@ -3,6 +3,8 @@
  */
 
 import { Label, LabelStatus } from './labelModel';
+import { CALIB_WARN_PX, CALIB_ERROR_PX } from './calibConstants';
+import { validateCalibrationGeometry } from './calibration';
 
 export interface Issue {
   path: string;
@@ -226,9 +228,73 @@ export function validateLabel(
         severity: 'error',
       });
     }
+    if (!label.calibration_gt) {
+      issues.push({
+        path: 'calibration_gt',
+        message: "calibration_gt is required for status 'final'",
+        severity: 'error',
+      });
+    }
+    if (!label.split) {
+      issues.push({
+        path: 'split',
+        message: "split is required for status 'final'",
+        severity: 'error',
+      });
+    }
+    if (!label.bowler_type) {
+      issues.push({
+        path: 'bowler_type',
+        message: "bowler_type is required for status 'final'",
+        severity: 'error',
+      });
+    }
+    if (!label.lighting) {
+      issues.push({
+        path: 'lighting',
+        message: "lighting is required for status 'final'",
+        severity: 'error',
+      });
+    }
+    if (label.impact?.type === 'pad' && label.lbw == null) {
+      issues.push({
+        path: 'lbw',
+        message: "lbw is required for status 'final' when impact.type is 'pad'",
+        severity: 'error',
+      });
+    }
   }
 
-  // 7. Non-blocking warnings
+  // 7. Calibration geometry validation & residual checks
+  if (label.calibration_gt) {
+    const geomErrors = validateCalibrationGeometry(label.calibration_gt.points, w, h);
+    for (const err of geomErrors) {
+      issues.push({
+        path: 'calibration_gt',
+        message: err,
+        severity: 'error',
+      });
+    }
+
+    if (label.calibration_gt.residual_px != null) {
+      const res = label.calibration_gt.residual_px;
+      if (res > CALIB_ERROR_PX) {
+        issues.push({
+          path: 'calibration_gt.residual_px',
+          message: `Calibration residual (${res.toFixed(2)} px) exceeds maximum error limit (${CALIB_ERROR_PX} px)`,
+          severity: 'error',
+        });
+      } else if (res > CALIB_WARN_PX) {
+        issues.push({
+          path: 'calibration_gt.residual_px',
+          message: `Calibration residual (${res.toFixed(2)} px) exceeds warning threshold (${CALIB_WARN_PX} px)`,
+          severity: 'warning',
+        });
+      }
+    }
+  }
+
+  // 8. Non-blocking warnings
   // Warning: release frame later than frame 20
   if (label.release && label.release.frame > 20) {
     issues.push({

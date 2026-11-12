@@ -266,6 +266,19 @@ def test_api_label_round_trip_and_atomic_write(test_env):
         "impact": {"type": "bat", "frame": 6, "x": 35.0, "y": 32.0},
         "last_visible_frame": 8,
         "lbw": None,
+        "calibration_gt": {
+            "points": {
+                "bat_L": [15.0, 15.0],
+                "bat_R": [45.0, 15.0],
+                "bowl_L": [10.0, 50.0],
+                "bowl_R": [50.0, 50.0],
+                "bat_stump": [30.0, 13.2],
+                "bowl_stump": [30.0, 53.3],
+            },
+            "source": "system_verified",
+            "residual_px": 0.0,
+            "updated_at": "2026-11-05T10:00:00Z",
+        },
         "flags": ["camera_moved"],
         "notes": "Verified clean edge",
     }
@@ -304,6 +317,31 @@ def test_api_label_round_trip_and_atomic_write(test_env):
     updated_clip = resp_clips.json()[0]
     assert updated_clip["label_status"] == "final"
     assert updated_clip["split"] == "dev"
+
+    # PUT recomputes client residual if untrusted / differing by > 0.01
+    valid_payload["calibration_gt"]["residual_px"] = 99.9
+    resp_recompute = client.put(f"/api/clips/{clip_id}/label", json=valid_payload)
+    assert resp_recompute.status_code == 200
+    # Overwritten by backend
+    assert abs(resp_recompute.json()["label"]["calibration_gt"]["residual_px"] - 0.014) < 0.01
+
+    # Old label compatibility: draft label without calibration_gt
+    old_draft = {
+        "schema_version": 1,
+        "clip_id": clip_id,
+        "annotator": "tester",
+        "mode": "blind",
+        "status": "draft",
+        "created_at": "2026-11-05T10:00:00Z",
+        "updated_at": "2026-11-05T10:00:00Z",
+        "notes": "Old draft without calibration",
+    }
+    resp_old = client.put(f"/api/clips/{clip_id}/label", json=old_draft)
+    assert resp_old.status_code == 200
+    assert resp_old.json()["label"]["calibration_gt"] is None
+    resp_get_old = client.get(f"/api/clips/{clip_id}/label")
+    assert resp_get_old.status_code == 200
+    assert resp_get_old.json()["calibration_gt"] is None
 
 
 def test_manifest_auto_build_if_missing(tmp_path, monkeypatch):

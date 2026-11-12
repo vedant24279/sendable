@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
 from app.schema import Label, validate_label
+from app.calib import fit_homography
 
 
 def get_repo_root() -> Path:
@@ -351,6 +352,20 @@ async def save_label(clip_id: str, request: Request) -> Dict[str, Any]:
     frame_count = clip["frame_count"]
     width = clip["width"]
     height = clip["height"]
+
+    # Recompute calibration residual_px on every PUT (never trust client value)
+    calib_gt = body.get("calibration_gt")
+    if calib_gt and isinstance(calib_gt, dict) and "points" in calib_gt:
+        pts = calib_gt.get("points")
+        if isinstance(pts, dict):
+            try:
+                fit_res = fit_homography(pts)
+                computed_res = float(fit_res.residual_px)
+                client_res = calib_gt.get("residual_px")
+                if client_res is None or abs(float(client_res) - computed_res) > 0.01:
+                    calib_gt["residual_px"] = computed_res
+            except Exception:
+                pass
 
     try:
         label = validate_label(

@@ -24,6 +24,19 @@ describe('validateLabel', () => {
       impact: { type: 'bat', frame: 22, x: 900, y: 420 },
       last_visible_frame: 40,
       lbw: null,
+      calibration_gt: {
+        points: {
+          bat_L: [778.0, 434.0],
+          bat_R: [1083.0, 430.0],
+          bowl_L: [739.0, 764.0],
+          bowl_R: [1115.0, 768.0],
+          bat_stump: [936.0, 426.0],
+          bowl_stump: [922.0, 784.0],
+        },
+        source: 'system_verified',
+        residual_px: 2.5,
+        updated_at: new Date().toISOString(),
+      },
       flags: [],
       notes: '',
     };
@@ -215,6 +228,25 @@ describe('validateLabel', () => {
       expect(paths).toContain('last_visible_frame');
       expect(paths).toContain('ball_colour');
       expect(paths).toContain('batter_hand');
+      expect(paths).toContain('calibration_gt');
+      expect(paths).toContain('split');
+      expect(paths).toContain('bowler_type');
+      expect(paths).toContain('lighting');
+    });
+
+    it('requires lbw when impact type is pad in final', () => {
+      const label = createValidFinalLabel();
+      label.impact = { type: 'pad', frame: 22, x: 900, y: 420 };
+      label.lbw = null;
+      const issues = validateLabel(label, baseMeta, 'final');
+      const issue = issues.find((i) => i.path === 'lbw');
+      expect(issue).toBeDefined();
+      expect(issue?.message).toContain("lbw is required for status 'final' when impact.type is 'pad'");
+
+      // Valid when lbw is provided
+      label.lbw = 'out';
+      const issuesValid = validateLabel(label, baseMeta, 'final');
+      expect(issuesValid.find((i) => i.path === 'lbw')).toBeUndefined();
     });
 
     it('requires impact coordinates when impact type is not "none" in final', () => {
@@ -256,6 +288,34 @@ describe('validateLabel', () => {
       const warn = issues.find((i) => i.path === 'last_visible_frame' && i.severity === 'warning');
       expect(warn).toBeDefined();
       expect(warn?.message).toContain('before bounce frame');
+    });
+
+    it('warns when calibration residual_px is between CALIB_WARN_PX and CALIB_ERROR_PX', () => {
+      const label = createValidFinalLabel();
+      label.calibration_gt!.residual_px = 6.5; // > 4.0 and <= 12.0
+      const issues = validateLabel(label, baseMeta);
+      const warn = issues.find((i) => i.path === 'calibration_gt.residual_px' && i.severity === 'warning');
+      expect(warn).toBeDefined();
+      expect(warn?.message).toContain('exceeds warning threshold');
+    });
+
+    it('errors when calibration residual_px exceeds CALIB_ERROR_PX', () => {
+      const label = createValidFinalLabel();
+      label.calibration_gt!.residual_px = 14.2; // > 12.0
+      const issues = validateLabel(label, baseMeta);
+      const err = issues.find((i) => i.path === 'calibration_gt.residual_px' && i.severity === 'error');
+      expect(err).toBeDefined();
+      expect(err?.message).toContain('exceeds maximum error limit');
+    });
+
+    it('errors when calibration geometry is invalid', () => {
+      const label = createValidFinalLabel();
+      // Reverse horizontal ordering
+      label.calibration_gt!.points.bat_L = [1100, 434];
+      const issues = validateLabel(label, baseMeta);
+      const err = issues.find((i) => i.path === 'calibration_gt' && i.severity === 'error');
+      expect(err).toBeDefined();
+      expect(err?.message).toContain('strictly less than');
     });
   });
 });

@@ -8,6 +8,9 @@ from __future__ import annotations
 from typing import List, Literal, Optional, Any, Dict
 from pydantic import BaseModel, Field, model_validator, ValidationInfo
 
+from app.calib_constants import CALIB_ERROR_PX, CALIB_POINT_NAMES
+from app.calib import validate_calibration_geometry
+
 
 BallColour = Literal["white", "red", "pink"]
 BatterHand = Literal["right", "left"]
@@ -25,6 +28,7 @@ LabelFlag = Literal["ball_not_visible", "camera_moved", "bad_calibration", "uncl
 LabelStatus = Literal["draft", "final", "flagged"]
 LabelMode = Literal["assisted", "blind"]
 SplitType = Literal["dev", "final"]
+CalibrationSource = Literal["system_verified", "system_adjusted", "manual"]
 
 
 class Point(BaseModel):
@@ -47,6 +51,23 @@ class ImpactPoint(BaseModel):
         return self
 
 
+class CalibrationGT(BaseModel):
+    points: Dict[str, List[float]]
+    source: CalibrationSource
+    residual_px: Optional[float] = None
+    updated_at: str
+
+    @model_validator(mode="after")
+    def validate_calib_gt(self) -> "CalibrationGT":
+        missing = [k for k in CALIB_POINT_NAMES if k not in self.points]
+        if missing:
+            raise ValueError(f"calibration_gt missing points: {missing}")
+        for k, pt in self.points.items():
+            if not (isinstance(pt, (list, tuple)) and len(pt) == 2):
+                raise ValueError(f"calibration_gt point {k} must have [x, y] coordinates, got {pt}")
+        return self
+
+
 class Label(BaseModel):
     schema_version: int = Field(default=1)
     clip_id: str
@@ -65,11 +86,17 @@ class Label(BaseModel):
     impact: Optional[ImpactPoint] = None
     last_visible_frame: Optional[int] = None
     lbw: Optional[LBWDecision] = None
+    calibration_gt: Optional[CalibrationGT] = None
     flags: List[LabelFlag] = Field(default_factory=list)
     notes: str = ""
 
     @model_validator(mode="after")
     def validate_rules(self, info: ValidationInfo) -> "Label":
+        context = info.context or {}
+        frame_count = context.get("frame_count")
+        width = context.get("width")
+        height = context.get("height")
+
         # 1. schema_version must be 1
         if self.schema_version != 1:
             raise ValueError("schema_version must be 1")
@@ -134,7 +161,25 @@ class Label(BaseModel):
                     f"release.frame ({self.release.frame}) must be <= last_visible_frame ({self.last_visible_frame})"
                 )
 
-        # 5. Status final requirements
+        # 5. Calibration geometry validation (if calibration_gt is present)
+        if self.calibration_gt is not None:
+            geom_errors = validate_calibration_geometry(
+                self.calibration_gt.points,
+                width=width,
+                height=height,
+            )
+            if geom_errors:
+                raise ValueError("; ".join(geom_errors))
+
+            if (
+                self.calibration_gt.residual_px is not None
+                and self.calibration_gt.residual_px > CALIB_ERROR_PX
+            ):
+                raise ValueError(
+                    f"calibration_gt residual_px ({self.calibration_gt.residual_px:.2f} px) exceeds CALIB_ERROR_PX ({CALIB_ERROR_PX} px)"
+                )
+
+        # 6. Status final requirements
         if self.status == "final":
             if not self.annotator or not self.annotator.strip():
                 raise ValueError("annotator is required for status 'final'")
@@ -159,13 +204,18 @@ class Label(BaseModel):
                 raise ValueError("ball_colour is required for status 'final'")
             if self.batter_hand is None:
                 raise ValueError("batter_hand is required for status 'final'")
+            if self.calibration_gt is None:
+                raise ValueError("calibration_gt is required for status 'final'")
+            if self.split is None:
+                raise ValueError("split is required for status 'final'")
+            if self.bowler_type is None:
+                raise ValueError("bowler_type is required for status 'final'")
+            if self.lighting is None:
+                raise ValueError("lighting is required for status 'final'")
+            if self.impact.type == "pad" and self.lbw is None:
+                raise ValueError("lbw is required for status 'final' when impact.type is 'pad'")
 
-        # 6. Dimensional bounds validation if context is provided
-        context = info.context or {}
-        frame_count = context.get("frame_count")
-        width = context.get("width")
-        height = context.get("height")
-
+        # 7. Dimensional bounds validation if context is provided
         if frame_count is not None or width is not None or height is not None:
             self._validate_bounds(frame_count=frame_count, width=width, height=height)
 

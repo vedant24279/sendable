@@ -206,3 +206,73 @@ Validates labels against `schema.py` constraints and clip dimension metadata, re
 - **Progress Counter**: Tracks finalized deliveries: `Final: x / N`.
 - **Auto-Advance**: Checkbox (enabled by default) automatically selects the next non-final clip upon finalizing.
 - **Dirty Safety**: `window.beforeunload` listener alerts the user if attempting to leave or reload with unsaved modifications or while a save is in flight.
+
+## 8. Ground-Truth Calibration
+
+### 8.1 World Coordinates & Pitch Regulation
+The ground-truth calibration model establishes metric planar homography between pixel coordinates and the 3D ground plane ($Y = 0$).
+- **Source of Regulation Dimensions**: [`backend/pipeline/reconstruct3d/world_points.py`](file:///c:/Users/vedan/Desktop/Internship/sendable/backend/pipeline/reconstruct3d/world_points.py) derived from official Laws of Cricket (Law 6):
+  - Pitch length stump-to-stump: `PITCH_LENGTH_M = 20.12` ($22\text{ yards}$).
+  - Popping crease in front of stumps: `POPPING_IN_FRONT_M = 1.22` ($4\text{ ft}$).
+  - Return crease half-width from middle stump: `RETURN_HALF_WIDTH_M = 1.32` ($4\text{ ft } 4\text{ in}$).
+  - Distance between popping creases: $20.12 - 2 \times 1.22 = 17.68\text{ m}$ ($58\text{ ft}$).
+- **Coordinate Axes**:
+  - `pitch_x_m`: Perpendicular across the pitch, positive toward **IMAGE-RIGHT** (left return crease at $-1.32\text{ m}$, right return crease at $+1.32\text{ m}$).
+  - `pitch_z_m`: Along pitch length, positive toward the bowler ($0.0\text{ m}$ at the striker's stump line).
+- **World Points $(X, Z)$ in Metres**:
+  - `bat_stump`: $(0.0, 0.0)$
+  - `bat_L`: $(-1.32, 1.22)$
+  - `bat_R`: $(+1.32, 1.22)$
+  - `bowl_L`: $(-1.32, 18.90)$ (derived as $20.12 - 1.22 = 18.90\text{ m}$)
+  - `bowl_R`: $(+1.32, 18.90)$ (derived as $20.12 - 1.22 = 18.90\text{ m}$)
+  - `bowl_stump`: $(0.0, 20.12)$
+
+> [!WARNING]
+> **Known Issue with Legacy Zones**: `zones.py` in `Zone-div_V8m` and `Zone-div(final)` uses $19.68\text{ m}$ between popping creases (which inflates pitch length to $22.12\text{ m}$ instead of the regulation $20.12\text{ m}$ / $17.68\text{ m}$ popping crease separation). Its `length_m` and length-zone boundaries are consequently inflated; the annotator does not use it.
+
+### 8.2 Data Model (`calibration_gt`)
+Additive optional field on `Label`:
+```json
+{
+  "calibration_gt": {
+    "points": {
+      "bat_L": [x, y],
+      "bat_R": [x, y],
+      "bowl_L": [x, y],
+      "bowl_R": [x, y],
+      "bat_stump": [x, y],
+      "bowl_stump": [x, y]
+    },
+    "source": "system_verified | system_adjusted | manual",
+    "residual_px": 0.0,
+    "updated_at": "ISO-8601 string"
+  }
+}
+```
+
+### 8.3 Geometry & Error Thresholds
+- **Exact 4-Point Homography**: Solves $8\times8$ linear system for $H_{\text{img} \to \text{world}}$ from the four corners (`bat_L`, `bat_R`, `bowl_L`, `bowl_R`).
+- **Stump Reprojection Residual (`residual_px`)**:
+  - Middle stumps (`bat_stump` at $(0, 0)$ and `bowl_stump` at $(0, 20.12)$) are reprojected into image space via $H^{-1}$.
+  - Root-Mean-Square (RMS) pixel reprojection distance:
+    $$\text{residual\_px} = \sqrt{\frac{d_{\text{bat\_stump}}^2 + d_{\text{bowl\_stump}}^2}{2}}$$
+- **Provisional Thresholds**:
+  - `CALIB_WARN_PX = 4.0`: residual $> 4.0\text{ px}$ generates a non-blocking validation warning.
+  - `CALIB_ERROR_PX = 12.0`: residual $> 12.0\text{ px}$ generates a blocking validation error.
+  - *Note*: Because stump points sit extrapolated $1.22\text{ m}$ beyond the crease line, perspective errors are naturally amplified at them; these thresholds are provisional.
+- **Backend Recomputation**: On every `PUT`, the backend recomputes `residual_px` using `fit_homography`. If the client value differs by $> 0.01\text{ px}$ (or is missing), the backend overwrites it.
+
+### 8.4 Validation Constraints
+- **Bounds**: All 6 points must fall within $[0, \text{width}] \times [0, \text{height}]$.
+- **Convexity & Area**: The 4 corner points (`bat_L`, `bat_R`, `bowl_R`, `bowl_L`) must form a strictly convex quadrilateral with area $> 2\%$ of the frame area.
+- **Horizontal Ordering**:
+  - `bat_L.x < bat_R.x` and `bowl_L.x < bowl_R.x`.
+  - `bat_stump.x` must be bounded between `bat_L.x` and `bat_R.x`.
+  - `bowl_stump.x` must be bounded between `bowl_L.x` and `bowl_R.x`.
+- **Status "final" Requirements**:
+  In addition to earlier requirements, a label with `status: "final"` strictly requires:
+  - `calibration_gt` is non-null.
+  - `split` is non-null (`"dev"` or `"final"`).
+  - `bowler_type` is non-null (`"pace"` or `"spin"`).
+  - `lighting` is non-null (`"bright"`, `"overcast"`, or `"low"`).
+  - When `impact.type === "pad"`, `lbw` must be non-null.
