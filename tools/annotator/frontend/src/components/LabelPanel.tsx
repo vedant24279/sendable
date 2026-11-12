@@ -51,14 +51,7 @@ export const LabelPanel: FC = () => {
   const [flagModalOpen, setFlagModalOpen] = useState(false);
   const [flagNoteInput, setFlagNoteInput] = useState('');
 
-  if (!label) {
-    return <div className="panel-loading">No label loaded</div>;
-  }
-
-  const ghostVisible = computeGhostVisible(annotatorState);
-  const isFinal = label.status === 'final';
-
-  // Compute homography for event pitch positions
+  // Compute homography for event pitch positions (unconditionally at top for Rules of Hooks)
   const calibH = useMemo(() => {
     if (!label?.calibration_gt?.points) return null;
     const pts = label.calibration_gt.points;
@@ -72,6 +65,13 @@ export const LabelPanel: FC = () => {
     }
     return null;
   }, [label?.calibration_gt?.points]);
+
+  if (!label) {
+    return <div className="panel-loading">No label loaded</div>;
+  }
+
+  const ghostVisible = computeGhostVisible(annotatorState);
+  const isFinal = label.status === 'final';
 
   const getPitchPos = (pt: { x: number; y: number } | null | undefined): string => {
     if (!pt || pt.x == null || pt.y == null || !calibH) return '—';
