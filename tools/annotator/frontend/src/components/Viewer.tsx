@@ -202,9 +202,18 @@ export const Viewer: FC = () => {
     }
 
     // 3. Calibration Overlay (in standard mode)
-    if (!calibrationMode && overlays.calibration && prefill?.calibration) {
+    if (!calibrationMode && overlays.calibration) {
       const calibMap = new Map<string, Point>();
-      prefill.calibration.forEach((pt) => calibMap.set(pt.name, { x: pt.x, y: pt.y }));
+      if (label?.calibration_gt?.points) {
+        const pts = label.calibration_gt.points;
+        for (const [name, coords] of Object.entries(pts)) {
+          if (coords && coords.length === 2) {
+            calibMap.set(name, { x: coords[0], y: coords[1] });
+          }
+        }
+      } else if (prefill?.calibration) {
+        prefill.calibration.forEach((pt) => calibMap.set(pt.name, { x: pt.x, y: pt.y }));
+      }
 
       const bowlL = calibMap.get('bowl_L');
       const bowlR = calibMap.get('bowl_R');
