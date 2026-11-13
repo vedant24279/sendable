@@ -13,3 +13,6 @@ tools/annotator/frontend/dist/
 tools/annotator/manifest.json
 tools/annotator/contact_sheets/
 tools/annotator/calib_report.csv
+
+# Local pipeline virtual environment
+backend/.venv-pipeline/
