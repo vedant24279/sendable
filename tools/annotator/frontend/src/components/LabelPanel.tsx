@@ -3,6 +3,7 @@ import type { FC } from 'react';
 import { useAnnotatorStore } from '../store';
 import { useLabelStore } from '../labelStore';
 import { computeGhostVisible } from '../lib/ghost';
+import { formatCompareCsvRow } from '../lib/compare';
 import { fitHomography, pixelToWorld } from '../lib/calibration';
 import { CalibrationPanel } from './CalibrationPanel';
 import {
@@ -33,6 +34,10 @@ export const LabelPanel: FC = () => {
     clips,
     selectClip,
     autoAdvance,
+    compareMode,
+    selectedRun,
+    compareData,
+    loadingCompare,
   } = annotatorState;
 
   const {
@@ -72,6 +77,8 @@ export const LabelPanel: FC = () => {
 
   const ghostVisible = computeGhostVisible(annotatorState);
   const isFinal = label.status === 'final';
+  const compareFormatted = formatCompareCsvRow(compareData?.csv_row);
+  const sysEvents = compareData?.found ? compareData.events : undefined;
 
   const getPitchPos = (pt: { x: number; y: number } | null | undefined): string => {
     if (!pt || pt.x == null || pt.y == null || !calibH) return '—';
@@ -110,6 +117,106 @@ export const LabelPanel: FC = () => {
 
   return (
     <div className="label-panel-container">
+      {compareMode && (
+        <div className="compare-panel-section">
+          <div className="compare-readonly-pill">Compare mode: read-only</div>
+          <div className="compare-run-sub">
+            Run: <span className="mono-text">{selectedRun || '—'}</span>
+          </div>
+          {loadingCompare ? (
+            <div className="hint-text">Loading compare data...</div>
+          ) : (
+            <>
+              {!compareData?.found && !compareData?.csv_row && (
+                <div className="hint-text">No results for this clip in this run.</div>
+              )}
+              <table className="compare-metrics-table">
+                <tbody>
+                  <tr>
+                    <th>Release error</th>
+                    <td className="mono-text">{compareFormatted.releaseError}</td>
+                  </tr>
+                  <tr>
+                    <th>Bounce error</th>
+                    <td className="mono-text">{compareFormatted.bounceError}</td>
+                  </tr>
+                  <tr>
+                    <th>Pitch Z error</th>
+                    <td className="mono-text">{compareFormatted.pitchZError}</td>
+                  </tr>
+                  <tr>
+                    <th>Dev vs impact</th>
+                    <td className="mono-text">{compareFormatted.deviationVsImpact}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div className="compare-jump-grid">
+                <button
+                  type="button"
+                  className="compare-jump-btn"
+                  disabled={label.release?.frame == null}
+                  onClick={() => {
+                    if (label.release?.frame != null) setCurrentFrame(label.release.frame);
+                  }}
+                >
+                  Go to label release
+                </button>
+                <button
+                  type="button"
+                  className="compare-jump-btn"
+                  disabled={sysEvents?.release?.frame == null}
+                  onClick={() => {
+                    if (sysEvents?.release?.frame != null) setCurrentFrame(sysEvents.release.frame);
+                  }}
+                >
+                  Go to system release
+                </button>
+                <button
+                  type="button"
+                  className="compare-jump-btn"
+                  disabled={label.bounce?.frame == null}
+                  onClick={() => {
+                    if (label.bounce?.frame != null) setCurrentFrame(label.bounce.frame);
+                  }}
+                >
+                  Go to label bounce
+                </button>
+                <button
+                  type="button"
+                  className="compare-jump-btn"
+                  disabled={sysEvents?.bounce?.frame == null}
+                  onClick={() => {
+                    if (sysEvents?.bounce?.frame != null) setCurrentFrame(sysEvents.bounce.frame);
+                  }}
+                >
+                  Go to system bounce
+                </button>
+                <button
+                  type="button"
+                  className="compare-jump-btn"
+                  disabled={label.impact?.frame == null}
+                  onClick={() => {
+                    if (label.impact?.frame != null) setCurrentFrame(label.impact.frame);
+                  }}
+                >
+                  Go to label impact
+                </button>
+                <button
+                  type="button"
+                  className="compare-jump-btn"
+                  disabled={sysEvents?.deviation?.frame == null}
+                  onClick={() => {
+                    if (sysEvents?.deviation?.frame != null) setCurrentFrame(sysEvents.deviation.frame);
+                  }}
+                >
+                  Go to system deviation
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* 1. Header with Save State & Mode Badge */}
       <div className="label-panel-header">
         <h3 className="section-title">Delivery Annotation</h3>
@@ -137,6 +244,7 @@ export const LabelPanel: FC = () => {
             type="button"
             className="action-btn btn-adopt"
             onClick={handleAdopt}
+            disabled={compareMode}
             title="Adopt system predicted release and bounce"
           >
             📥 Adopt System Release+Bounce
@@ -147,7 +255,7 @@ export const LabelPanel: FC = () => {
             type="button"
             className="action-btn btn-draft"
             onClick={() => void saveDraft()}
-            disabled={saveState === 'saving'}
+            disabled={compareMode || saveState === 'saving'}
             title="Save as draft (Ctrl+S)"
           >
             Save Draft <kbd>Ctrl+S</kbd>
@@ -156,7 +264,7 @@ export const LabelPanel: FC = () => {
             type="button"
             className="action-btn btn-finalize"
             onClick={() => void handleFinalize()}
-            disabled={saveState === 'saving'}
+            disabled={compareMode || saveState === 'saving'}
             title="Finalize delivery (Ctrl+Enter)"
           >
             Finalize <kbd>Ctrl+↵</kbd>
@@ -166,6 +274,7 @@ export const LabelPanel: FC = () => {
           <button
             type="button"
             className="action-btn btn-flag"
+            disabled={compareMode}
             onClick={() => setFlagModalOpen(true)}
           >
             🚩 Flag
@@ -174,6 +283,7 @@ export const LabelPanel: FC = () => {
             <button
               type="button"
               className="action-btn btn-reopen"
+              disabled={compareMode}
               onClick={reopen}
             >
               🔓 Reopen Draft
@@ -241,6 +351,7 @@ export const LabelPanel: FC = () => {
                     <button
                       type="button"
                       className="btn-tiny btn-open-calib"
+                      disabled={compareMode}
                       onClick={(e) => {
                         e.stopPropagation();
                         annotatorState.setCalibrationMode(true);
@@ -267,6 +378,7 @@ export const LabelPanel: FC = () => {
             <button
               type="button"
               className="btn-tiny btn-open-calib"
+              disabled={compareMode}
               onClick={() => annotatorState.setCalibrationMode(true)}
               title="Switch to pitch calibration mode (C)"
             >
@@ -305,6 +417,7 @@ export const LabelPanel: FC = () => {
                       <button
                         type="button"
                         className="table-action-btn clear"
+                        disabled={compareMode}
                         onClick={() => apply((l) => clearEvent(l, 'release', { ghostVisible }))}
                         title="Clear release"
                       >
@@ -335,6 +448,7 @@ export const LabelPanel: FC = () => {
                       <button
                         type="button"
                         className="table-action-btn clear"
+                        disabled={compareMode}
                         onClick={() => apply((l) => clearEvent(l, 'bounce', { ghostVisible }))}
                         title="Clear bounce"
                       >
@@ -377,6 +491,7 @@ export const LabelPanel: FC = () => {
                       <button
                         type="button"
                         className="table-action-btn clear"
+                        disabled={compareMode}
                         onClick={() => apply((l) => clearEvent(l, 'impact', { ghostVisible }))}
                         title="Clear impact"
                       >
@@ -407,6 +522,7 @@ export const LabelPanel: FC = () => {
                     <button
                       type="button"
                       className="table-action-btn clear"
+                      disabled={compareMode}
                       onClick={() => apply((l) => clearEvent(l, 'last_visible', { ghostVisible }))}
                       title="Clear last visible frame"
                     >
@@ -432,6 +548,7 @@ export const LabelPanel: FC = () => {
               key={t}
               type="button"
               className={`impact-btn ${label.impact?.type === t ? 'active' : ''}`}
+              disabled={compareMode}
               onClick={() => apply((l) => setImpactType(l, t, { ghostVisible }))}
             >
               <kbd>{idx + 1}</kbd> {t}
@@ -446,7 +563,7 @@ export const LabelPanel: FC = () => {
         <select
           className="select-input"
           value={label.lbw ?? ''}
-          disabled={label.impact?.type !== 'pad'}
+          disabled={compareMode || label.impact?.type !== 'pad'}
           onChange={(e) => {
             const val = e.target.value as LBWDecision;
             apply((l) => setLbw(l, val || null, { ghostVisible }));
@@ -472,6 +589,7 @@ export const LabelPanel: FC = () => {
           <select
             className="select-input"
             value={label.ball_colour ?? ''}
+            disabled={compareMode}
             onChange={(e) =>
               apply((l) => setMeta(l, 'ball_colour', (e.target.value as BallColour) || null, { ghostVisible }))
             }
@@ -490,6 +608,7 @@ export const LabelPanel: FC = () => {
           <select
             className="select-input"
             value={label.batter_hand ?? ''}
+            disabled={compareMode}
             onChange={(e) =>
               apply((l) => setMeta(l, 'batter_hand', (e.target.value as BatterHand) || null, { ghostVisible }))
             }
@@ -505,6 +624,7 @@ export const LabelPanel: FC = () => {
           <select
             className="select-input"
             value={label.bowler_type ?? ''}
+            disabled={compareMode}
             onChange={(e) =>
               apply((l) => setMeta(l, 'bowler_type', (e.target.value as BowlerType) || null, { ghostVisible }))
             }
@@ -520,6 +640,7 @@ export const LabelPanel: FC = () => {
           <select
             className="select-input"
             value={label.lighting ?? ''}
+            disabled={compareMode}
             onChange={(e) =>
               apply((l) => setMeta(l, 'lighting', (e.target.value as Lighting) || null, { ghostVisible }))
             }
@@ -536,6 +657,7 @@ export const LabelPanel: FC = () => {
           <select
             className="select-input"
             value={label.split ?? ''}
+            disabled={compareMode}
             onChange={(e) =>
               apply((l) => setSplit(l, (e.target.value as SplitType) || null, { ghostVisible }))
             }
@@ -556,6 +678,7 @@ export const LabelPanel: FC = () => {
               <input
                 type="checkbox"
                 checked={label.flags.includes(f)}
+                disabled={compareMode}
                 onChange={() => apply((l) => toggleFlag(l, f, { ghostVisible }))}
               />
               <span>{f.replace(/_/g, ' ')}</span>
@@ -572,6 +695,7 @@ export const LabelPanel: FC = () => {
           rows={3}
           placeholder="Add delivery annotation notes..."
           value={label.notes}
+          disabled={compareMode}
           onChange={(e) => apply((l) => setNotes(l, e.target.value, { ghostVisible }))}
         />
       </div>

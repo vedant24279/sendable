@@ -66,11 +66,15 @@ export function useHotkeys(): void {
           case 'openFilePicker':
             aStore.triggerOpenFilePicker();
             break;
+          case 'toggleCompareMode':
+            void aStore.toggleCompareMode();
+            break;
           case 'toggleCalibrationMode':
+            if (aStore.compareMode) break;
             aStore.toggleCalibrationMode();
             break;
           case 'armTool':
-            if (aStore.calibrationMode) break;
+            if (aStore.compareMode || aStore.calibrationMode) break;
             setArmedTool(action.tool);
             break;
           case 'disarm':
@@ -78,23 +82,27 @@ export function useHotkeys(): void {
             setSelectedPin(null);
             break;
           case 'setLastVisible':
-            if (aStore.calibrationMode) break;
+            if (aStore.compareMode || aStore.calibrationMode) break;
             lStore.apply((prev) => setLastVisible(prev, currentFrameRef.current, { ghostVisible: gv }));
             break;
           case 'setImpactType':
-            if (aStore.calibrationMode) break;
+            if (aStore.compareMode || aStore.calibrationMode) break;
             lStore.apply((prev) => setImpactType(prev, action.impactType, { ghostVisible: gv }));
             break;
           case 'undo':
+            if (aStore.compareMode) break;
             lStore.undo();
             break;
           case 'redo':
+            if (aStore.compareMode) break;
             lStore.redo();
             break;
           case 'saveDraft':
+            if (aStore.compareMode) break;
             void lStore.saveDraft();
             break;
           case 'finalize':
+            if (aStore.compareMode) break;
             void (async () => {
               const ok = await lStore.finalize();
               if (ok && useAnnotatorStore.getState().autoAdvance) {
@@ -111,6 +119,7 @@ export function useHotkeys(): void {
             })();
             break;
           case 'nudge': {
+            if (aStore.compareMode) break;
             if (aStore.calibrationMode) {
               const sel = aStore.selectedCalibPoint;
               if (sel && lStore.label?.calibration_gt?.points?.[sel]) {

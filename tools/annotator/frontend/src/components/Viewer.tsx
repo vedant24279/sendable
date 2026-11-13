@@ -14,6 +14,11 @@ import {
 import { frameCache } from '../lib/frameCache';
 import { computeGhostVisible } from '../lib/ghost';
 import { pinsForFrame, hitTestPin } from '../lib/pins';
+import {
+  systemPinsForFrame,
+  hitTestSystemPin,
+  type SystemPin,
+} from '../lib/compare';
 import { placeEvent, setCalibrationPoint, round1 } from '../lib/labelModel';
 import {
   hitTestCalibPoint,
@@ -53,6 +58,8 @@ export const Viewer: FC = () => {
     selectedCalibPoint,
     setSelectedCalibPoint,
     loupeMag,
+    compareMode,
+    compareData,
   } = annotatorState;
 
   const { label, apply } = useLabelStore();
@@ -61,6 +68,11 @@ export const Viewer: FC = () => {
 
   // Transient warning for impact without type
   const [impactWarning, setImpactWarning] = useState<string | null>(null);
+  const [hoveredSysPin, setHoveredSysPin] = useState<{
+    pin: SystemPin;
+    screenX: number;
+    screenY: number;
+  } | null>(null);
 
   // Mutable refs to prevent React re-renders on mouse movement
   const mousePosRef = useRef<Point>({ x: 0, y: 0 });
@@ -156,12 +168,14 @@ export const Viewer: FC = () => {
       if (calibrationMode) {
         const activeHandle = selectedCalibPoint ? `[Handle: ${selectedCalibPoint}]` : '[Calibration Mode]';
         statusRef.current.textContent = `${activeHandle}   ${pitchStr ? `${pitchStr}   ` : ''}${cursorStr}   zoom ${zoomPct}%`;
+      } else if (compareMode) {
+        statusRef.current.textContent = `[COMPARE READ-ONLY]   Frame ${currentFrame} / ${clip.frame_count - 1}   t = ${t} s   ${pitchStr ? `${pitchStr}   ` : ''}${cursorStr}   zoom ${zoomPct}%`;
       } else {
         const extraPitch = pitchStr ? `${pitchStr}   ` : '';
         statusRef.current.textContent = `Frame ${currentFrame} / ${clip.frame_count - 1}   t = ${t} s   ${extraPitch}${cursorStr}   zoom ${zoomPct}%`;
       }
     },
-    [clip, currentFrame, armedTool, label, calibrationMode, selectedCalibPoint]
+    [clip, currentFrame, armedTool, label, calibrationMode, selectedCalibPoint, compareMode]
   );
 
   // Main canvas drawing function
@@ -409,6 +423,59 @@ export const Viewer: FC = () => {
       );
     });
 
+    // 6b. Compare Mode System Trajectory (small hollow circles) & System Diamond Pins ("sys R", "sys B", "sys D")
+    if (compareMode && compareData?.found) {
+      const sysTraj = compareData.trajectory || [];
+      if (sysTraj.length > 0) {
+        sysTraj.forEach((pt) => {
+          const sPt = imageToScreen(pt, vp);
+          const isCurrent = pt.frame === currentFrame;
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(sPt.x, sPt.y, isCurrent ? 5 : 3, 0, Math.PI * 2);
+          ctx.strokeStyle = isCurrent ? '#facc15' : 'rgba(56, 189, 248, 0.85)';
+          ctx.lineWidth = isCurrent ? 2 : 1.3;
+          ctx.stroke();
+          ctx.restore();
+        });
+      }
+
+      const sysPins = systemPinsForFrame(compareData.events, currentFrame);
+      sysPins.forEach((sPin) => {
+        const sPt = imageToScreen({ x: sPin.x, y: sPin.y }, vp);
+        const radius = sPin.exact ? 8 : 6.5;
+
+        ctx.save();
+        ctx.globalAlpha = sPin.exact ? 1.0 : 0.42;
+
+        // Hollow diamond shape
+        ctx.beginPath();
+        ctx.moveTo(sPt.x, sPt.y - radius);
+        ctx.lineTo(sPt.x + radius, sPt.y);
+        ctx.lineTo(sPt.x, sPt.y + radius);
+        ctx.lineTo(sPt.x - radius, sPt.y);
+        ctx.closePath();
+
+        ctx.strokeStyle = sPin.color;
+        ctx.lineWidth = sPin.exact ? 2.2 : 1.4;
+        if (!sPin.exact) {
+          ctx.setLineDash([3, 2]);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Label text ("sys R", "sys B", "sys D")
+        ctx.font = sPin.exact ? 'bold 11px system-ui, sans-serif' : '600 10px system-ui, sans-serif';
+        ctx.fillStyle = sPin.color;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const suffix = sPin.exact ? '' : ` (${sPin.frameOffset > 0 ? `+${sPin.frameOffset}` : sPin.frameOffset}f)`;
+        ctx.fillText(`${sPin.shortLabel}${suffix}`, sPt.x + radius + 5, sPt.y - 10);
+
+        ctx.restore();
+      });
+    }
+
     // 7. Calibration Mode Overlays (Pitch rectangle, 1m grid, predicted stumps, 6 handles)
     if (calibrationMode) {
       const calibGT = label?.calibration_gt;
@@ -620,6 +687,8 @@ export const Viewer: FC = () => {
     calibrationMode,
     selectedCalibPoint,
     loupeMag,
+    compareMode,
+    compareData,
   ]);
 
   // Subscribe to frameCache updates to re-render when image is loaded
@@ -715,8 +784,11 @@ export const Viewer: FC = () => {
     };
     const imgPt = screenToImage(cursor, viewportRef.current);
 
-    // Left button (0): Tool placement OR Calibration Handle OR Pin Selection / Dragging
+    // Left button (0): Disabled in Compare read-only mode; otherwise Tool placement / Calibration / Pin Drag
     if (e.button === 0) {
+      if (compareMode) {
+        return;
+      }
       if (calibrationMode) {
         const calibGT = label?.calibration_gt;
         const points = (calibGT?.points || {}) as Record<string, [number, number]>;
@@ -853,6 +925,27 @@ export const Viewer: FC = () => {
       });
     }
 
+    // Check system pin hover tooltip in compare mode
+    if (compareMode && compareData?.found) {
+      const imgPt = screenToImage(cursor, viewportRef.current);
+      const visibleSysPins = systemPinsForFrame(compareData.events, currentFrame);
+      const hitSys = hitTestSystemPin(
+        visibleSysPins,
+        imgPt.x,
+        imgPt.y,
+        viewportRef.current.scale,
+        14
+      );
+      if (hitSys) {
+        const screenPinPt = imageToScreen({ x: hitSys.x, y: hitSys.y }, viewportRef.current);
+        setHoveredSysPin({ pin: hitSys, screenX: screenPinPt.x, screenY: screenPinPt.y });
+      } else if (hoveredSysPin) {
+        setHoveredSysPin(null);
+      }
+    } else if (hoveredSysPin) {
+      setHoveredSysPin(null);
+    }
+
     // If loupe is active, redraw loupe position
     if (loupeEnabled || altHeld) {
       draw();
@@ -905,6 +998,9 @@ export const Viewer: FC = () => {
   const handleMouseLeave = () => {
     isMouseOverRef.current = false;
     isPanningRef.current = false;
+    if (hoveredSysPin) {
+      setHoveredSysPin(null);
+    }
     if (isDraggingCalibRef.current && draggedCalibNameRef.current && dragCurrentImgPosRef.current) {
       isDraggingCalibRef.current = false;
       const target = draggedCalibNameRef.current;
@@ -957,6 +1053,7 @@ export const Viewer: FC = () => {
         <canvas
           ref={canvasRef}
           className={`viewer-canvas ${calibrationMode ? 'cursor-calib' : armedTool ? 'cursor-armed' : ''}`}
+          title={hoveredSysPin ? hoveredSysPin.pin.tooltip : undefined}
           onContextMenu={(e) => e.preventDefault()}
           onWheel={handleWheel}
           onMouseDown={handleMouseDown}
@@ -965,6 +1062,17 @@ export const Viewer: FC = () => {
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         />
+        {compareMode && hoveredSysPin && (
+          <div
+            className="compare-pin-tooltip"
+            style={{
+              left: `${hoveredSysPin.screenX + 12}px`,
+              top: `${Math.max(8, hoveredSysPin.screenY - 28)}px`,
+            }}
+          >
+            {hoveredSysPin.pin.tooltip}
+          </div>
+        )}
         {impactWarning && (
           <div className="viewer-toast-warning">
             <span>⚠️ {impactWarning}</span>

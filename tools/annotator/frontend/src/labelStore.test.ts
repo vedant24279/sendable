@@ -315,4 +315,53 @@ describe('useLabelStore', () => {
     useLabelStore.getState().reopen();
     expect(useLabelStore.getState().label?.status).toBe('draft');
   });
+
+  it('read-only guard blocks all edits, autosaves, tool arming, and calibration mode while Compare is on', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(api, 'getLabel').mockResolvedValue(null);
+    const putSpy = vi.spyOn(api, 'putLabel').mockImplementation(async (_id, l) => l);
+
+    await useLabelStore.getState().load('clip_01');
+    const initialSnapshot = JSON.parse(JSON.stringify(useLabelStore.getState().label)) as Label;
+
+    // Enable compare mode with a run available
+    useAnnotatorStore.setState({
+      runs: ['baseline_1'],
+      selectedRun: 'baseline_1',
+      compareMode: true,
+      armedTool: null,
+      calibrationMode: false,
+    });
+
+    // Attempt label edits, undo/redo, save, finalize, flag, reopen
+    useLabelStore.getState().apply((prev) =>
+      placeEvent(prev, 'release', 8, 500, 400, { ghostVisible: false })
+    );
+    useLabelStore.getState().apply((prev) => setImpactType(prev, 'pad'));
+    useLabelStore.getState().flag('Should be ignored');
+    useLabelStore.getState().undo();
+    useLabelStore.getState().redo();
+    await useLabelStore.getState().saveDraft();
+    const finResult = await useLabelStore.getState().finalize();
+    vi.advanceTimersByTime(5000);
+
+    expect(finResult).toBe(false);
+    expect(useLabelStore.getState().label).toEqual(initialSnapshot);
+    expect(useLabelStore.getState().dirty).toBe(false);
+    expect(putSpy).not.toHaveBeenCalled();
+
+    // Attempt tool arming and calibration mode toggle
+    useAnnotatorStore.getState().setArmedTool('release');
+    useAnnotatorStore.getState().toggleCalibrationMode();
+    expect(useAnnotatorStore.getState().armedTool).toBeNull();
+    expect(useAnnotatorStore.getState().calibrationMode).toBe(false);
+
+    // Turning compareMode off restores normal editing
+    useAnnotatorStore.setState({ compareMode: false });
+    useLabelStore.getState().apply((prev) =>
+      placeEvent(prev, 'release', 8, 500, 400, { ghostVisible: false })
+    );
+    expect(useLabelStore.getState().label?.release).toEqual({ frame: 8, x: 500, y: 400 });
+    expect(useLabelStore.getState().dirty).toBe(true);
+  });
 });

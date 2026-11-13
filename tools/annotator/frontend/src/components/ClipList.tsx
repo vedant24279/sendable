@@ -7,6 +7,7 @@ import {
   sortRecents,
   sliceRecents,
 } from '../lib/libraryUtils';
+import { sortClipsByRunMetric } from '../lib/compare';
 
 export const ClipList: FC = () => {
   const clips = useAnnotatorStore((s) => s.clips);
@@ -27,10 +28,13 @@ export const ClipList: FC = () => {
   const uploadFiles = useAnnotatorStore((s) => s.uploadFiles);
   const uploadState = useAnnotatorStore((s) => s.uploadState);
   const dismissUploadModal = useAnnotatorStore((s) => s.dismissUploadModal);
+  const runMetricsByClip = useAnnotatorStore((s) => s.runMetricsByClip);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'none' | 'draft' | 'final' | 'flagged'>('all');
-  const [sortBy, setSortBy] = useState<'default' | 'system_residual'>('default');
+  const [sortBy, setSortBy] = useState<
+    'default' | 'system_residual' | 'worst_bounce' | 'worst_release'
+  >('default');
   const [isDragOver, setIsDragOver] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -96,8 +100,11 @@ export const ClipList: FC = () => {
       statusFilter,
     });
 
-    if (activeTab === 'debug' && sortBy === 'system_residual') {
-      filtered.sort((a, b) => {
+    let ordered = filtered;
+    if (sortBy === 'worst_bounce' || sortBy === 'worst_release') {
+      ordered = sortClipsByRunMetric(filtered, runMetricsByClip, sortBy);
+    } else if (activeTab === 'debug' && sortBy === 'system_residual') {
+      ordered = [...filtered].sort((a, b) => {
         const resA = a.system_residual_px != null ? a.system_residual_px : -1;
         const resB = b.system_residual_px != null ? b.system_residual_px : -1;
         return resB - resA;
@@ -105,20 +112,20 @@ export const ClipList: FC = () => {
     }
 
     if (activeTab === 'recents') {
-      const sliced = sliceRecents(filtered, showAllRecents, 20);
+      const sliced = sliceRecents(ordered, showAllRecents, 20);
       return {
         displayClips: sliced.visible,
         hasMoreRecents: sliced.hasMore,
-        totalRecentsCount: filtered.length,
+        totalRecentsCount: ordered.length,
       };
     }
 
     return {
-      displayClips: filtered,
+      displayClips: ordered,
       hasMoreRecents: false,
-      totalRecentsCount: filtered.length,
+      totalRecentsCount: ordered.length,
     };
-  }, [clips, libraryClips, activeTab, search, statusFilter, sortBy, showAllRecents]);
+  }, [clips, libraryClips, activeTab, search, statusFilter, sortBy, showAllRecents, runMetricsByClip]);
 
   const isEmptyLibrary = libraryClips.length === 0 && (activeTab === 'recents' || activeTab === 'library');
 
@@ -208,17 +215,20 @@ export const ClipList: FC = () => {
               <option value="final">Final</option>
               <option value="flagged">Flagged</option>
             </select>
-            {activeTab === 'debug' && (
-              <select
-                className="filter-select sort-select"
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-                title="Sort clips list"
-              >
-                <option value="default">Default order</option>
+            <select
+              className="filter-select sort-select"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              aria-label="Sort clips"
+              title="Sort clips list"
+            >
+              <option value="default">Default order</option>
+              <option value="worst_bounce">Worst bounce error</option>
+              <option value="worst_release">Worst release error</option>
+              {activeTab === 'debug' && (
                 <option value="system_residual">By residual</option>
-              </select>
-            )}
+              )}
+            </select>
           </div>
         </div>
       </div>

@@ -17,6 +17,7 @@ export type Action =
   | { type: 'disarm' }
   | { type: 'nudge'; dx: number; dy: number }
   | { type: 'toggleCalibrationMode' }
+  | { type: 'toggleCompareMode' }
   | { type: 'openFilePicker' };
 
 export interface KeyContext {
@@ -87,6 +88,7 @@ export function keyToAction(ev: KeyContext): Action | null {
   if (!ctrl && !alt) {
     if (key === 'o' || key === 'O') return { type: 'openFilePicker' };
     if (key === 'c' || key === 'C') return { type: 'toggleCalibrationMode' };
+    if (key === 'v' || key === 'V') return { type: 'toggleCompareMode' };
     if (key === 'r' || key === 'R') return { type: 'armTool', tool: 'release' };
     if (key === 'b' || key === 'B') return { type: 'armTool', tool: 'bounce' };
     if (key === 'h' || key === 'H') return { type: 'armTool', tool: 'impact' };

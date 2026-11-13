@@ -1,10 +1,14 @@
 import { create } from 'zustand';
 import {
   ClipItem,
+  CompareResponse,
   PrefillData,
   fetchClips,
+  fetchCompare,
   fetchPrefill,
   fetchLibraryInfo,
+  fetchRunMetrics,
+  fetchRuns,
   markClipOpened,
   hideClip,
   uploadVideoFile,
@@ -68,9 +72,20 @@ export interface AnnotatorState {
   filePickerTrigger: number;
   isDraggingFiles: boolean;
   uploadState: UploadState;
+  runs: string[];
+  selectedRun: string | null;
+  compareMode: boolean;
+  compareData: CompareResponse | null;
+  loadingCompare: boolean;
+  runMetricsByClip: Record<string, Record<string, string>>;
 
   // Actions
   loadClips: (retries?: number) => Promise<void>;
+  loadRuns: () => Promise<void>;
+  setSelectedRun: (runName: string) => Promise<void>;
+  toggleCompareMode: () => Promise<void>;
+  setCompareMode: (enabled: boolean) => Promise<void>;
+  loadCompareForCurrentClip: () => Promise<void>;
   selectClip: (clipId: string) => Promise<void>;
   setCurrentFrame: (frame: number | ((prev: number) => number)) => void;
   setPlaying: (playing: boolean) => void;
@@ -144,6 +159,12 @@ export const useAnnotatorStore = create<AnnotatorState>((set, get) => ({
     results: [],
     showResultsModal: false,
   },
+  runs: [],
+  selectedRun: null,
+  compareMode: false,
+  compareData: null,
+  loadingCompare: false,
+  runMetricsByClip: {},
 
   setActiveTab: (activeTab) => set({ activeTab }),
   setShowAllRecents: (showAllRecents) => set({ showAllRecents }),
@@ -154,8 +175,10 @@ export const useAnnotatorStore = create<AnnotatorState>((set, get) => ({
     })),
   triggerOpenFilePicker: () =>
     set((state) => ({ filePickerTrigger: state.filePickerTrigger + 1 })),
-  setArmedTool: (tool) => set({ armedTool: tool }),
-  setSelectedPin: (pin) => set({ selectedPin: pin }),
+  setArmedTool: (tool) =>
+    set((state) => (state.compareMode && tool !== null ? state : { armedTool: tool })),
+  setSelectedPin: (pin) =>
+    set((state) => (state.compareMode && pin !== null ? state : { selectedPin: pin })),
   setBlindToggle: (blindToggle) => set({ blindToggle }),
   setAutoAdvance: (autoAdvance) => set({ autoAdvance }),
   setAnnotatorName: (annotatorName) => set({ annotatorName }),
@@ -173,6 +196,7 @@ export const useAnnotatorStore = create<AnnotatorState>((set, get) => ({
     })),
   toggleCalibrationMode: () =>
     set((state) => {
+      if (state.compareMode) return state;
       const nextMode = !state.calibrationMode;
       return {
         calibrationMode: nextMode,
@@ -186,17 +210,116 @@ export const useAnnotatorStore = create<AnnotatorState>((set, get) => ({
       };
     }),
   setCalibrationMode: (calibrationMode) =>
-    set((state) => ({
-      calibrationMode,
-      armedTool: null,
-      selectedPin: null,
-      loupeEnabled: calibrationMode ? true : state.loupeEnabled,
-      loupeMag: calibrationMode ? 8 : state.loupeMag,
-      selectedCalibPoint: calibrationMode
-        ? (state.selectedCalibPoint || 'bat_L')
-        : state.selectedCalibPoint,
-    })),
+    set((state) => {
+      if (state.compareMode && calibrationMode) return state;
+      return {
+        calibrationMode,
+        armedTool: null,
+        selectedPin: null,
+        loupeEnabled: calibrationMode ? true : state.loupeEnabled,
+        loupeMag: calibrationMode ? 8 : state.loupeMag,
+        selectedCalibPoint: calibrationMode
+          ? (state.selectedCalibPoint || 'bat_L')
+          : state.selectedCalibPoint,
+      };
+    }),
   setSelectedCalibPoint: (selectedCalibPoint) => set({ selectedCalibPoint }),
+
+  loadRuns: async () => {
+    try {
+      const runs = await fetchRuns();
+      const prevSelected = get().selectedRun;
+      const nextSelected =
+        runs.length === 0
+          ? null
+          : prevSelected && runs.includes(prevSelected)
+            ? prevSelected
+            : runs[0];
+
+      set((state) => ({
+        runs,
+        selectedRun: nextSelected,
+        compareMode: runs.length === 0 ? false : state.compareMode,
+      }));
+
+      if (nextSelected) {
+        const metrics = await fetchRunMetrics(nextSelected).catch(() => ({}));
+        if (get().selectedRun === nextSelected) {
+          set({ runMetricsByClip: metrics });
+        }
+        if (get().compareMode && get().selectedClipId) {
+          await get().loadCompareForCurrentClip();
+        }
+      } else {
+        set({ runMetricsByClip: {}, compareData: null });
+      }
+    } catch (err) {
+      console.warn('Failed to fetch runs:', err);
+    }
+  },
+
+  setSelectedRun: async (runName: string) => {
+    set({ selectedRun: runName, compareData: null, runMetricsByClip: {} });
+    try {
+      const metrics = await fetchRunMetrics(runName).catch(() => ({}));
+      if (get().selectedRun === runName) {
+        set({ runMetricsByClip: metrics });
+      }
+    } catch {
+      // keep empty metrics
+    }
+    if (get().compareMode && get().selectedClipId) {
+      await get().loadCompareForCurrentClip();
+    }
+  },
+
+  loadCompareForCurrentClip: async () => {
+    const { selectedClipId, selectedRun, compareMode } = get();
+    if (!compareMode || !selectedClipId || !selectedRun) {
+      return;
+    }
+    set({ loadingCompare: true });
+    try {
+      const data = await fetchCompare(selectedClipId, selectedRun);
+      if (
+        get().selectedClipId === selectedClipId &&
+        get().selectedRun === selectedRun &&
+        get().compareMode
+      ) {
+        set({ compareData: data, loadingCompare: false });
+      }
+    } catch (err) {
+      console.warn(`Failed to fetch compare data for ${selectedClipId}:`, err);
+      if (get().selectedClipId === selectedClipId && get().compareMode) {
+        set({ compareData: { found: false }, loadingCompare: false });
+      }
+    }
+  },
+
+  setCompareMode: async (enabled: boolean) => {
+    const { runs } = get();
+    if (enabled && runs.length === 0) {
+      return;
+    }
+    if (enabled) {
+      set({
+        compareMode: true,
+        armedTool: null,
+        selectedPin: null,
+        calibrationMode: false,
+      });
+      await get().loadCompareForCurrentClip();
+    } else {
+      set({
+        compareMode: false,
+        loadingCompare: false,
+      });
+    }
+  },
+
+  toggleCompareMode: async () => {
+    await get().setCompareMode(!get().compareMode);
+  },
   cycleCalibLoupe: () =>
     set((state) => {
       if (!state.loupeEnabled) {
@@ -275,10 +398,15 @@ export const useAnnotatorStore = create<AnnotatorState>((set, get) => ({
       playing: false,
       prefill: null,
       loadingPrefill: true,
+      compareData: null,
       clips: state.clips.map((c) =>
         c.clip_id === clipId ? { ...c, last_opened_at: nowIso } : c
       ),
     }));
+
+    if (get().compareMode) {
+      void get().loadCompareForCurrentClip();
+    }
 
     const clip = clips.find((c) => c.clip_id === clipId);
     if (clip) {

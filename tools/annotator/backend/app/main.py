@@ -4,12 +4,14 @@ FastAPI Backend for Cricket Delivery Annotator.
 
 from __future__ import annotations
 
+import csv
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # Ensure tools/annotator/backend is on sys.path
 _current_dir = Path(__file__).resolve().parent
@@ -18,7 +20,7 @@ if str(_backend_dir) not in sys.path:
     sys.path.insert(0, str(_backend_dir))
 
 import cv2
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
@@ -57,6 +59,46 @@ def get_labels_dir() -> Path:
         p = Path(env_dir)
         return p if p.is_absolute() else (REPO_ROOT / p)
     return REPO_ROOT / "eval" / "labels"
+
+
+RUN_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+CLIP_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def get_runs_dir() -> Path:
+    """Return configured eval runs directory from EVAL_RUNS_DIR env or default to eval/runs."""
+    env_dir = os.getenv("EVAL_RUNS_DIR")
+    if env_dir:
+        p = Path(env_dir)
+        return p if p.is_absolute() else (REPO_ROOT / p)
+    return REPO_ROOT / "eval" / "runs"
+
+
+def get_reports_dir() -> Path:
+    """Return configured eval reports directory from EVAL_REPORTS_DIR env or default to eval/reports."""
+    env_dir = os.getenv("EVAL_REPORTS_DIR")
+    if env_dir:
+        p = Path(env_dir)
+        return p if p.is_absolute() else (REPO_ROOT / p)
+    return REPO_ROOT / "eval" / "reports"
+
+
+def _validate_run_name(run: str) -> str:
+    if not isinstance(run, str) or not RUN_NAME_RE.fullmatch(run):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid run name: must match ^[A-Za-z0-9_-]+$",
+        )
+    return run
+
+
+def _validate_clip_id(clip_id: str) -> str:
+    if not isinstance(clip_id, str) or not CLIP_ID_RE.fullmatch(clip_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid clip_id: must match ^[A-Za-z0-9_-]+$",
+        )
+    return clip_id
 
 
 app = FastAPI(title="Cricket Delivery Annotator API")
@@ -407,6 +449,143 @@ def get_frame(clip_id: str, n: int) -> Response:
     )
 
 
+def _normalize_results_events_and_trajectory(
+    res: Dict[str, Any],
+) -> Tuple[Dict[str, Optional[Dict[str, Any]]], List[Dict[str, Any]]]:
+    """Normalize events and trajectory from a pipeline results.json payload."""
+    ev_raw = res.get("events") or {}
+
+    def norm_event(name: str) -> Optional[Dict[str, Any]]:
+        e = ev_raw.get(name)
+        if not e or not isinstance(e, dict):
+            return None
+        res_e: Dict[str, Any] = {
+            "frame": e.get("frame"),
+            "x": float(e["x"]) if e.get("x") is not None else None,
+            "y": float(e["y"]) if e.get("y") is not None else None,
+        }
+        for extra in ("timestamp_sec", "type", "zone", "length_m", "grid_cell"):
+            if extra in e:
+                res_e[extra] = e[extra]
+        return res_e
+
+    events = {
+        "release": norm_event("release"),
+        "bounce": norm_event("bounce"),
+        "impact": norm_event("impact"),
+        "deviation": norm_event("deviation"),
+    }
+
+    raw_traj = res.get("trajectory") or []
+    trajectory: List[Dict[str, Any]] = []
+    for pt in raw_traj:
+        if isinstance(pt, dict) and "frame" in pt and "x" in pt and "y" in pt:
+            trajectory.append(
+                {
+                    "frame": int(pt["frame"]),
+                    "x": float(pt["x"]),
+                    "y": float(pt["y"]),
+                    "conf": float(pt["conf"]) if pt.get("conf") is not None else None,
+                    "interpolated": bool(pt.get("interpolated", False)),
+                }
+            )
+
+    return events, trajectory
+
+
+def _load_report_per_clip_csv(run_name: str) -> Dict[str, Dict[str, str]]:
+    """Load per-clip CSV rows for a validated run_name keyed by clip_id."""
+    safe_run = _validate_run_name(run_name)
+    reports_dir = get_reports_dir().resolve()
+    csv_path = (reports_dir / f"{safe_run}_per_clip.csv").resolve()
+    if not csv_path.is_relative_to(reports_dir) or not csv_path.is_file():
+        return {}
+    rows: Dict[str, Dict[str, str]] = {}
+    with open(csv_path, "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            cid = row.get("clip_id")
+            if cid:
+                rows[cid] = dict(row)
+    return rows
+
+
+@app.get("/api/runs")
+def list_runs() -> List[str]:
+    """List valid run folder names under eval/runs containing run_info.json, newest first."""
+    runs_dir = get_runs_dir().resolve()
+    if not runs_dir.is_dir():
+        return []
+
+    items: List[Tuple[str, float, str]] = []
+    for entry in runs_dir.iterdir():
+        if not entry.is_dir() or not RUN_NAME_RE.fullmatch(entry.name):
+            continue
+        info_path = entry / "run_info.json"
+        if not info_path.is_file():
+            continue
+        utc_time = ""
+        try:
+            with open(info_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict) and isinstance(data.get("utc_time"), str):
+                    utc_time = data["utc_time"]
+        except Exception:
+            pass
+        mtime = info_path.stat().st_mtime
+        items.append((utc_time, mtime, entry.name))
+
+    items.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    return [item[2] for item in items]
+
+
+@app.get("/api/runs/{run}/metrics")
+def get_run_metrics(run: str) -> Dict[str, Any]:
+    """Return per-clip CSV metrics keyed by clip_id for the specified run."""
+    safe_run = _validate_run_name(run)
+    return {
+        "run": safe_run,
+        "rows": _load_report_per_clip_csv(safe_run),
+    }
+
+
+@app.get("/api/clips/{clip_id}/compare")
+def get_clip_compare(clip_id: str, run: str = Query(...)) -> Dict[str, Any]:
+    """Return system events, trajectory, and optional per-clip CSV row for read-only compare view."""
+    safe_clip = _validate_clip_id(clip_id)
+    safe_run = _validate_run_name(run)
+
+    runs_dir = get_runs_dir().resolve()
+    results_path = (runs_dir / safe_run / safe_clip / "results.json").resolve()
+    if not results_path.is_relative_to(runs_dir):
+        raise HTTPException(status_code=400, detail="Invalid compare path")
+
+    csv_rows = _load_report_per_clip_csv(safe_run)
+    csv_row = csv_rows.get(safe_clip)
+
+    if not results_path.is_file():
+        resp: Dict[str, Any] = {"found": False}
+        if csv_row is not None:
+            resp["csv_row"] = csv_row
+        return resp
+
+    try:
+        with open(results_path, "r", encoding="utf-8") as f:
+            res = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read results.json: {e}")
+
+    events, trajectory = _normalize_results_events_and_trajectory(res)
+    out: Dict[str, Any] = {
+        "found": True,
+        "events": events,
+        "trajectory": trajectory,
+    }
+    if csv_row is not None:
+        out["csv_row"] = csv_row
+    return out
+
+
 @app.get("/api/clips/{clip_id}/prefill")
 def get_prefill(clip_id: str) -> Dict[str, Any]:
     resolved = resolve_clip(clip_id)
@@ -439,51 +618,7 @@ def get_prefill(clip_id: str) -> Dict[str, Any]:
     with open(results_json, "r", encoding="utf-8") as f:
         res = json.load(f)
 
-    # Normalise events (all nullable)
-    ev_raw = res.get("events") or {}
-
-    def norm_event(name: str) -> Optional[Dict[str, Any]]:
-        e = ev_raw.get(name)
-        if not e or not isinstance(e, dict):
-            return None
-        res_e: Dict[str, Any] = {
-            "frame": e.get("frame"),
-            "x": float(e["x"]) if e.get("x") is not None else None,
-            "y": float(e["y"]) if e.get("y") is not None else None,
-        }
-        if "timestamp_sec" in e:
-            res_e["timestamp_sec"] = e["timestamp_sec"]
-        if "type" in e:
-            res_e["type"] = e["type"]
-        if "zone" in e:
-            res_e["zone"] = e["zone"]
-        if "length_m" in e:
-            res_e["length_m"] = e["length_m"]
-        if "grid_cell" in e:
-            res_e["grid_cell"] = e["grid_cell"]
-        return res_e
-
-    events = {
-        "release": norm_event("release"),
-        "bounce": norm_event("bounce"),
-        "impact": norm_event("impact"),
-        "deviation": norm_event("deviation"),
-    }
-
-    # Normalise trajectory
-    raw_traj = res.get("trajectory") or []
-    trajectory: List[Dict[str, Any]] = []
-    for pt in raw_traj:
-        if isinstance(pt, dict) and "frame" in pt and "x" in pt and "y" in pt:
-            trajectory.append(
-                {
-                    "frame": int(pt["frame"]),
-                    "x": float(pt["x"]),
-                    "y": float(pt["y"]),
-                    "conf": float(pt["conf"]) if pt.get("conf") is not None else None,
-                    "interpolated": bool(pt.get("interpolated", False)),
-                }
-            )
+    events, trajectory = _normalize_results_events_and_trajectory(res)
 
     # Normalise calibration into list of named points {name, x, y}
     raw_calib = res.get("calibration") or {}

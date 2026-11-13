@@ -102,6 +102,45 @@ export class ApiValidationError extends Error {
   }
 }
 
+export interface CompareResponse {
+  found: boolean;
+  events?: PrefillEvents;
+  trajectory?: TrajectoryPoint[];
+  csv_row?: Record<string, string> | null;
+}
+
+export async function fetchRuns(): Promise<string[]> {
+  const res = await fetch('/api/runs');
+  if (!res.ok) {
+    throw new Error(`Failed to fetch runs: HTTP ${res.status}`);
+  }
+  return res.json() as Promise<string[]>;
+}
+
+export async function fetchRunMetrics(
+  runName: string
+): Promise<Record<string, Record<string, string>>> {
+  const res = await fetch(`/api/runs/${encodeURIComponent(runName)}/metrics`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch run metrics: HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as { rows?: Record<string, Record<string, string>> };
+  return data.rows ?? {};
+}
+
+export async function fetchCompare(
+  clipId: string,
+  runName: string
+): Promise<CompareResponse> {
+  const res = await fetch(
+    `/api/clips/${encodeURIComponent(clipId)}/compare?run=${encodeURIComponent(runName)}`
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to fetch compare data: HTTP ${res.status}`);
+  }
+  return res.json() as Promise<CompareResponse>;
+}
+
 export async function fetchClips(): Promise<ClipItem[]> {
   const res = await fetch("/api/clips");
   if (!res.ok) {

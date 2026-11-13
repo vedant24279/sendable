@@ -11,6 +11,16 @@ describe('keyToAction', () => {
     expect(keyToAction({ key: 'C', targetTag: 'TEXTAREA' })).toBeNull();
     expect(keyToAction({ key: 'o', targetTag: 'INPUT' })).toBeNull();
     expect(keyToAction({ key: 'O', targetTag: 'TEXTAREA' })).toBeNull();
+    expect(keyToAction({ key: 'v', targetTag: 'INPUT' })).toBeNull();
+    expect(keyToAction({ key: 'V', targetTag: 'TEXTAREA' })).toBeNull();
+    expect(keyToAction({ key: 'v', targetTag: 'SELECT' })).toBeNull();
+  });
+
+  it('maps V to toggleCompareMode', () => {
+    expect(keyToAction({ key: 'v' })).toEqual({ type: 'toggleCompareMode' });
+    expect(keyToAction({ key: 'V' })).toEqual({ type: 'toggleCompareMode' });
+    expect(keyToAction({ key: 'v', ctrlKey: true })).toBeNull();
+    expect(keyToAction({ key: 'v', altKey: true })).toBeNull();
   });
 
   it('maps O to openFilePicker', () => {

@@ -10,6 +10,7 @@ import { formatFileSize } from './lib/libraryUtils';
 
 export default function App() {
   const loadClips = useAnnotatorStore((s) => s.loadClips);
+  const loadRuns = useAnnotatorStore((s) => s.loadRuns);
   const selectedClipId = useAnnotatorStore((s) => s.selectedClipId);
   const clips = useAnnotatorStore((s) => s.clips);
   const overlays = useAnnotatorStore((s) => s.overlays);
@@ -28,6 +29,11 @@ export default function App() {
   const toggleCalibrationMode = useAnnotatorStore((s) => s.toggleCalibrationMode);
   const loupeMag = useAnnotatorStore((s) => s.loupeMag);
   const uploadFiles = useAnnotatorStore((s) => s.uploadFiles);
+  const runs = useAnnotatorStore((s) => s.runs);
+  const selectedRun = useAnnotatorStore((s) => s.selectedRun);
+  const setSelectedRun = useAnnotatorStore((s) => s.setSelectedRun);
+  const compareMode = useAnnotatorStore((s) => s.compareMode);
+  const toggleCompareMode = useAnnotatorStore((s) => s.toggleCompareMode);
   const [viewerDragOver, setViewerDragOver] = useState(false);
 
   // Activate keyboard shortcuts
@@ -42,10 +48,11 @@ export default function App() {
     }
   }, [setAnnotatorName]);
 
-  // Load clips on mount
+  // Load clips and available eval runs on mount
   useEffect(() => {
     void loadClips();
-  }, [loadClips]);
+    void loadRuns();
+  }, [loadClips, loadRuns]);
 
   // Load label whenever selected clip or annotator changes
   useEffect(() => {
@@ -104,9 +111,42 @@ export default function App() {
               />
               <span>Auto-advance after finalize</span>
             </label>
+            <div className="compare-toolbar-group">
+              <button
+                className={`toolbar-btn ${compareMode ? 'btn-active btn-compare' : ''}`}
+                onClick={() => void toggleCompareMode()}
+                disabled={runs.length === 0}
+                title={
+                  runs.length === 0
+                    ? 'No evaluation runs found under eval/runs'
+                    : 'Toggle Read-Only Compare View (V)'
+                }
+              >
+                🔍 Compare (V)
+              </button>
+              <select
+                className="toolbar-select compare-run-select"
+                value={selectedRun ?? ''}
+                onChange={(e) => void setSelectedRun(e.target.value)}
+                disabled={runs.length === 0}
+                aria-label="Select evaluation run"
+                title="Evaluation run for Compare view and sorting"
+              >
+                {runs.length === 0 ? (
+                  <option value="">No runs</option>
+                ) : (
+                  runs.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
             <button
               className={`toolbar-btn ${calibrationMode ? 'btn-active btn-calib' : ''}`}
               onClick={toggleCalibrationMode}
+              disabled={compareMode}
               title="Toggle Calibration Mode (C)"
             >
               📐 Calibration (C)
@@ -131,6 +171,13 @@ export default function App() {
             </button>
           </div>
         </header>
+
+        {compareMode && (
+          <div className="compare-readonly-banner" role="status">
+            Compare mode: read-only
+            {selectedRun ? ` — Run: ${selectedRun}` : ''}
+          </div>
+        )}
 
         <section
           className={`viewer-wrapper ${viewerDragOver ? 'drag-over-active' : ''}`}

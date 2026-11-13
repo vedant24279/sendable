@@ -55,7 +55,12 @@ export const useLabelStore = create<LabelStoreState>((set, get) => ({
       autosaveTimer = null;
     }
     const currentLabel = get().label;
-    if (currentLabel && currentLabel.status === 'draft' && get().dirty) {
+    if (
+      !useAnnotatorStore.getState().compareMode &&
+      currentLabel &&
+      currentLabel.status === 'draft' &&
+      get().dirty
+    ) {
       try {
         await putLabel(currentLabel.clip_id, currentLabel);
       } catch (err) {
@@ -104,6 +109,7 @@ export const useLabelStore = create<LabelStoreState>((set, get) => ({
   },
 
   apply: (fn: (prev: Label) => Label) => {
+    if (useAnnotatorStore.getState().compareMode) return;
     const current = get().label;
     if (!current) return;
 
@@ -140,6 +146,7 @@ export const useLabelStore = create<LabelStoreState>((set, get) => ({
   },
 
   undo: () => {
+    if (useAnnotatorStore.getState().compareMode) return;
     const previous = historyStack.undo();
     if (!previous) return;
 
@@ -169,6 +176,7 @@ export const useLabelStore = create<LabelStoreState>((set, get) => ({
   },
 
   redo: () => {
+    if (useAnnotatorStore.getState().compareMode) return;
     const next = historyStack.redo();
     if (!next) return;
 
@@ -198,6 +206,7 @@ export const useLabelStore = create<LabelStoreState>((set, get) => ({
   },
 
   saveDraft: async () => {
+    if (useAnnotatorStore.getState().compareMode) return;
     if (autosaveTimer) {
       clearTimeout(autosaveTimer);
       autosaveTimer = null;
@@ -230,6 +239,7 @@ export const useLabelStore = create<LabelStoreState>((set, get) => ({
   },
 
   finalize: async () => {
+    if (useAnnotatorStore.getState().compareMode) return false;
     if (autosaveTimer) {
       clearTimeout(autosaveTimer);
       autosaveTimer = null;
@@ -289,6 +299,7 @@ export const useLabelStore = create<LabelStoreState>((set, get) => ({
   },
 
   flag: (note: string) => {
+    if (useAnnotatorStore.getState().compareMode) return;
     const current = get().label;
     if (!current) return;
 
@@ -307,6 +318,7 @@ export const useLabelStore = create<LabelStoreState>((set, get) => ({
   },
 
   reopen: () => {
+    if (useAnnotatorStore.getState().compareMode) return;
     const current = get().label;
     if (!current || current.status !== 'final') return;
 
@@ -331,6 +343,7 @@ export const useLabelStore = create<LabelStoreState>((set, get) => ({
   },
 
   executeAutosave: async (rev: number) => {
+    if (useAnnotatorStore.getState().compareMode) return;
     const state = get();
     if (!state.label || state.label.status !== 'draft' || !state.dirty) {
       return;
