@@ -83,22 +83,18 @@ export function sliceRecents(
   return { visible: items.slice(0, limit), hasMore: items.length > limit };
 }
 
-export type DecisionFilter = 'all' | 'out' | 'not_out' | 'unknown';
-
 /**
- * Filters clips by search query, label status, and (optionally) reference decision.
+ * Filters clips by search query and label status.
  */
 export function filterClipsByMeta(
   items: ClipItem[],
   options: {
     search?: string;
     statusFilter?: 'all' | 'none' | 'draft' | 'final' | 'flagged';
-    decisionFilter?: DecisionFilter;
   }
 ): ClipItem[] {
   const q = (options.search ?? '').toLowerCase();
   const statusFilter = options.statusFilter ?? 'all';
-  const decisionFilter = options.decisionFilter ?? 'all';
 
   return items.filter((c) => {
     const name = (c.display_name || c.clip_id).toLowerCase();
@@ -107,16 +103,7 @@ export function filterClipsByMeta(
     const matchesStatus =
       statusFilter === 'all' || c.label_status === statusFilter;
 
-    let matchesDecision = true;
-    if (decisionFilter === 'out') {
-      matchesDecision = c.reference_decision === 'out';
-    } else if (decisionFilter === 'not_out') {
-      matchesDecision = c.reference_decision === 'not_out';
-    } else if (decisionFilter === 'unknown') {
-      matchesDecision = c.reference_decision == null;
-    }
-
-    return matchesSearch && matchesStatus && matchesDecision;
+    return matchesSearch && matchesStatus;
   });
 }
 

@@ -2,7 +2,6 @@ import { FC, useMemo, useRef, useState, useEffect } from 'react';
 import { useAnnotatorStore } from '../store';
 import { useLabelStore } from '../labelStore';
 import {
-  DecisionFilter,
   filterClipsByMeta,
   timeAgo,
   sortRecents,
@@ -31,7 +30,6 @@ export const ClipList: FC = () => {
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'none' | 'draft' | 'final' | 'flagged'>('all');
-  const [decisionFilter, setDecisionFilter] = useState<DecisionFilter>('all');
   const [sortBy, setSortBy] = useState<'default' | 'system_residual'>('default');
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -96,7 +94,6 @@ export const ClipList: FC = () => {
     const filtered = filterClipsByMeta(poolClips, {
       search,
       statusFilter,
-      decisionFilter: activeTab === 'library' ? decisionFilter : 'all',
     });
 
     if (activeTab === 'debug' && sortBy === 'system_residual') {
@@ -121,7 +118,7 @@ export const ClipList: FC = () => {
       hasMoreRecents: false,
       totalRecentsCount: filtered.length,
     };
-  }, [clips, libraryClips, activeTab, search, statusFilter, decisionFilter, sortBy, showAllRecents]);
+  }, [clips, libraryClips, activeTab, search, statusFilter, sortBy, showAllRecents]);
 
   const isEmptyLibrary = libraryClips.length === 0 && (activeTab === 'recents' || activeTab === 'library');
 
@@ -211,19 +208,6 @@ export const ClipList: FC = () => {
               <option value="final">Final</option>
               <option value="flagged">Flagged</option>
             </select>
-            {activeTab === 'library' && (
-              <select
-                className="filter-select"
-                value={decisionFilter}
-                onChange={(e) => setDecisionFilter(e.target.value as DecisionFilter)}
-                aria-label="Filter by reference decision"
-              >
-                <option value="all">All decisions</option>
-                <option value="out">Out</option>
-                <option value="not_out">Not Out</option>
-                <option value="unknown">Unknown</option>
-              </select>
-            )}
             {activeTab === 'debug' && (
               <select
                 className="filter-select sort-select"
@@ -332,24 +316,6 @@ export const ClipList: FC = () => {
 
                 <div className="clip-row-sub">
                   <span className="clip-meta-frames">{clip.frame_count}f</span>
-                  {isLibraryClip && (
-                    <span
-                      className={`decision-badge decision-badge-sm ${
-                        clip.reference_decision === 'out'
-                          ? 'decision-out'
-                          : clip.reference_decision === 'not_out'
-                            ? 'decision-not-out'
-                            : 'decision-unknown'
-                      }`}
-                      title="Reference decision from filename"
-                    >
-                      {clip.reference_decision === 'out'
-                        ? 'OUT'
-                        : clip.reference_decision === 'not_out'
-                          ? 'NOT OUT'
-                          : '?'}
-                    </span>
-                  )}
                   {timeStr && <span className="clip-time-ago">{timeStr}</span>}
                   {clip.pool === 'debug' && clip.ball_type && (
                     <span className={`ball-badge ball-${clip.ball_type}`}>

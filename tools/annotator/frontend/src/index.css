@@ -1898,7 +1898,7 @@ kbd {
   max-width: 175px;
 }
 
-/* Reference decision, warnings-only box, and wrapped info panel fields */
+/* Warnings-only box and wrapped info panel fields */
 .validation-issues-box.warnings-only {
   background: rgba(217, 119, 6, 0.14);
   border-color: #d97706;
@@ -1922,56 +1922,6 @@ kbd {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.74rem;
   color: #f1f5f9;
-}
-
-.ref-decision-cell {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.decision-badge {
-  display: inline-block;
-  padding: 0.1rem 0.45rem;
-  border-radius: 3px;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  line-height: 1.3;
-}
-
-.decision-badge-sm {
-  padding: 0.04rem 0.32rem;
-  font-size: 0.62rem;
-}
-
-.decision-out {
-  background-color: #991b1b;
-  color: #fecaca;
-  border: 1px solid #ef4444;
-}
-
-.decision-not-out {
-  background-color: #065f46;
-  color: #a7f3d0;
-  border: 1px solid #10b981;
-}
-
-.decision-unknown {
-  background-color: #334155;
-  color: #cbd5e1;
-  border: 1px solid #475569;
-}
-
-.decision-select-inline {
-  background-color: #1e293b;
-  border: 1px solid #334155;
-  color: #f1f5f9;
-  border-radius: 3px;
-  font-size: 0.7rem;
-  padding: 0.1rem 0.25rem;
-  cursor: pointer;
 }
 
 .clip-warnings-dd {

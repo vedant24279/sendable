@@ -25,9 +25,6 @@ export interface ClipItem {
   last_opened_at?: string | null;
   warnings?: string[];
   size_bytes?: number;
-  reference_decision?: 'out' | 'not_out' | null;
-  ball_colour_hint?: 'white' | 'red' | 'pink' | null;
-  source_group?: string | null;
 }
 
 export interface EventRelease {
@@ -238,39 +235,6 @@ export async function hideClip(clipId: string): Promise<void> {
   if (!res.ok) {
     throw new Error(`Failed to hide clip: HTTP ${res.status}`);
   }
-}
-
-export interface LibraryClipPatch {
-  reference_decision?: 'out' | 'not_out' | null;
-  ball_colour_hint?: 'white' | 'red' | 'pink' | null;
-  source_group?: string | null;
-}
-
-export async function patchLibraryClip(
-  clipId: string,
-  patch: LibraryClipPatch
-): Promise<ClipItem> {
-  const res = await fetch(`/api/library/${encodeURIComponent(clipId)}`, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try {
-      const data = await res.json();
-      if (data?.detail) {
-        detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
-      }
-    } catch {
-      // keep HTTP status
-    }
-    throw new Error(`Failed to update library clip: ${detail}`);
-  }
-  const data = await res.json();
-  return (data.entry ?? data) as ClipItem;
 }
 
 export interface UploadResult {

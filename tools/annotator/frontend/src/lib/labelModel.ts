@@ -90,9 +90,6 @@ export interface ClipMetaInput {
   height?: number;
   fps?: number;
   ball_type?: string | null;
-  ball_colour_hint?: string | null;
-  reference_decision?: ReferenceDecision | null;
-  source_group?: string | null;
 }
 
 export interface EditContext {
@@ -127,8 +124,7 @@ export function emptyLabel(
 ): Label {
   const prefillBallType =
     (prefill as { ball_type?: string | null } | null)?.ball_type ??
-    meta.ball_type ??
-    meta.ball_colour_hint;
+    meta.ball_type;
   let ballColour: BallColour | null = null;
   if (
     prefillBallType === 'white' ||
@@ -158,8 +154,6 @@ export function emptyLabel(
     impact: null,
     last_visible_frame: null,
     lbw: null,
-    reference_decision: meta.reference_decision ?? null,
-    source_group: meta.source_group ?? null,
     calibration_gt: null,
     flags: [],
     notes: '',

@@ -290,24 +290,36 @@ describe('labelModel', () => {
     expect(confirmed).toEqual({ bat_stump: false, bowl_stump: false });
   });
 
-  it('prefills reference_decision, ball_colour_hint fallback, and source_group in emptyLabel', () => {
-    const label = emptyLabel(
-      {
-        clip_id: 'c_abc',
-        reference_decision: 'out',
-        ball_colour_hint: 'red',
-        source_group: 'ind_vs_aus',
-      },
+  it('starts library clip with ball_colour = null, preserves debug ball_type prefill, and round-trips optional fields', () => {
+    const libLabel = emptyLabel(
+      { clip_id: 'c_abc' },
       null,
       'tester',
     );
-    expect(label.reference_decision).toBe('out');
-    expect(label.ball_colour).toBe('red');
-    expect(label.source_group).toBe('ind_vs_aus');
+    expect(libLabel.ball_colour).toBeNull();
+    expect(libLabel.reference_decision).toBeUndefined();
+    expect(libLabel.source_group).toBeUndefined();
 
-    label.lbw = 'not_out_unspecified';
-    expect(label.lbw).toBe('not_out_unspecified');
-    label.lbw = 'not_available';
-    expect(label.lbw).toBe('not_available');
+    // Debug clip with ball_type still prefills ball_colour
+    const debugLabel = emptyLabel(
+      { clip_id: 'dbg_01', ball_type: 'pink' },
+      null,
+      'tester',
+    );
+    expect(debugLabel.ball_colour).toBe('pink');
+
+    // Preserves optional reference_decision, source_group, and new lbw values
+    const existing: Label = {
+      ...libLabel,
+      reference_decision: 'out',
+      source_group: 'series_a',
+      lbw: 'not_out_unspecified',
+    };
+    const roundTripped: Label = JSON.parse(JSON.stringify(existing));
+    expect(roundTripped.reference_decision).toBe('out');
+    expect(roundTripped.source_group).toBe('series_a');
+    expect(roundTripped.lbw).toBe('not_out_unspecified');
+    roundTripped.lbw = 'not_available';
+    expect(roundTripped.lbw).toBe('not_available');
   });
 });

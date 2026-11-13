@@ -162,30 +162,25 @@ describe('libraryUtils', () => {
         clip_id: 'c_1',
         display_name: 'ind_vs_aus_out.mp4',
         label_status: 'draft',
-        reference_decision: 'out',
       },
       {
         ...baseClip,
         clip_id: 'c_2',
         display_name: 'over_12_not_out.mp4',
         label_status: 'final',
-        reference_decision: 'not_out',
       },
       {
         ...baseClip,
         clip_id: 'c_3',
         display_name: 'practice_clip.mp4',
         label_status: 'none',
-        reference_decision: null,
       },
     ];
 
-    it('filters by decisionFilter and statusFilter', () => {
-      expect(filterClipsByMeta(items, { decisionFilter: 'out' }).map((c) => c.clip_id)).toEqual(['c_1']);
-      expect(filterClipsByMeta(items, { decisionFilter: 'not_out' }).map((c) => c.clip_id)).toEqual(['c_2']);
-      expect(filterClipsByMeta(items, { decisionFilter: 'unknown' }).map((c) => c.clip_id)).toEqual(['c_3']);
-      expect(filterClipsByMeta(items, { statusFilter: 'final', decisionFilter: 'not_out' }).map((c) => c.clip_id)).toEqual(['c_2']);
-      expect(filterClipsByMeta(items, { statusFilter: 'draft', decisionFilter: 'not_out' })).toEqual([]);
+    it('filters by statusFilter and search query', () => {
+      expect(filterClipsByMeta(items, { statusFilter: 'final' }).map((c) => c.clip_id)).toEqual(['c_2']);
+      expect(filterClipsByMeta(items, { statusFilter: 'draft' }).map((c) => c.clip_id)).toEqual(['c_1']);
+      expect(filterClipsByMeta(items, { search: 'practice' }).map((c) => c.clip_id)).toEqual(['c_3']);
     });
 
     it('formats file size cleanly', () => {

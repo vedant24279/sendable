@@ -12,7 +12,6 @@ import hashlib
 import json
 import os
 import shutil
-import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,12 +19,6 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 import cv2
 from fastapi import HTTPException
-
-_BACKEND_DIR = Path(__file__).resolve().parent.parent
-if str(_BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(_BACKEND_DIR))
-
-from filename_meta import parse_filename_meta  # noqa: E402
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm"}
 
@@ -251,7 +244,6 @@ async def process_video_upload(
             )
 
         now_iso = datetime.now(timezone.utc).isoformat()
-        parsed_meta = parse_filename_meta(base_name)
         entry: Dict[str, Any] = {
             "clip_id": clip_id,
             "display_name": base_name,
@@ -265,9 +257,6 @@ async def process_video_upload(
             "width": width,
             "height": height,
             "warnings": warnings,
-            "reference_decision": parsed_meta["reference_decision"],
-            "ball_colour_hint": parsed_meta["ball_colour_hint"],
-            "source_group": None,
         }
 
         catalog[clip_id] = entry
@@ -324,27 +313,6 @@ def hide_library_clip(clip_id: str, library_dir: Optional[Path] = None) -> bool:
     catalog[clip_id]["hidden"] = True
     save_library_catalog(catalog, library_dir)
     return True
-
-
-def patch_library_entry(
-    clip_id: str,
-    updates: Dict[str, Any],
-    library_dir: Optional[Path] = None,
-) -> Optional[Dict[str, Any]]:
-    """
-    Update allowed metadata fields (reference_decision, ball_colour_hint, source_group)
-    on a library catalog entry and save atomically. Returns updated entry or None if missing.
-    """
-    catalog = load_library_catalog(library_dir)
-    if clip_id not in catalog:
-        return None
-    entry = catalog[clip_id]
-    for key in ("reference_decision", "ball_colour_hint", "source_group"):
-        if key in updates:
-            entry[key] = updates[key]
-    catalog[clip_id] = entry
-    save_library_catalog(catalog, library_dir)
-    return entry
 
 
 def find_library_clip_video(clip_id: str, library_dir: Optional[Path] = None) -> Optional[Tuple[Path, Dict[str, Any]]]:

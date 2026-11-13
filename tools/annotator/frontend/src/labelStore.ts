@@ -3,7 +3,7 @@
  */
 
 import { create } from 'zustand';
-import { ClipMetaInput, Label, ReferenceDecision, emptyLabel } from './lib/labelModel';
+import { ClipMetaInput, Label, emptyLabel } from './lib/labelModel';
 import { validateLabel, Issue, ClipDimensions } from './lib/validate';
 import { HistoryStack } from './lib/history';
 import { getLabel, putLabel } from './api';
@@ -32,7 +32,6 @@ export interface LabelStoreState {
   reopen: () => void;
   flushPendingAutosave: () => Promise<void>;
   executeAutosave: (rev: number) => Promise<void>;
-  syncReferenceDecision: (clipId: string, decision: ReferenceDecision | null) => void;
 }
 
 let localRevision = 0;
@@ -80,19 +79,12 @@ export const useLabelStore = create<LabelStoreState>((set, get) => ({
       clip_id: clipId,
       split: clip?.split,
       ball_type: clip?.ball_type,
-      ball_colour_hint: clip?.ball_colour_hint,
-      reference_decision: clip?.reference_decision,
-      source_group: clip?.source_group,
       frame_count: clip?.frame_count,
       width: clip?.width,
       height: clip?.height,
     };
 
-    const initialLabel: Label = loaded
-      ? (clip?.reference_decision !== undefined
-          ? { ...loaded, reference_decision: clip.reference_decision ?? null }
-          : loaded)
-      : emptyLabel(clipMeta, prefill, annotator);
+    const initialLabel: Label = loaded ?? emptyLabel(clipMeta, prefill, annotator);
 
     historyStack = new HistoryStack<Label>(initialLabel);
     localRevision = 0;
@@ -365,21 +357,5 @@ export const useLabelStore = create<LabelStoreState>((set, get) => ({
         dirty: true,
       });
     }
-  },
-
-  syncReferenceDecision: (clipId: string, decision: ReferenceDecision | null) => {
-    const current = get().label;
-    if (!current || current.clip_id !== clipId) return;
-    const next: Label = {
-      ...current,
-      reference_decision: decision,
-    };
-    const clips = useAnnotatorStore.getState().clips;
-    const clip = clips.find((c) => c.clip_id === clipId);
-    const issues = validateLabel(next, clip, next.status);
-    set({
-      label: next,
-      issues,
-    });
   },
 }));

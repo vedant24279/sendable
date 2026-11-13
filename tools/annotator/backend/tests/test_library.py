@@ -288,7 +288,7 @@ def test_library_clip_prefill_and_frame_endpoints(temp_dirs):
     assert prefill_data["calibration"] is None
 
 
-def test_library_upload_parses_filename_meta_and_patch(temp_dirs):
+def test_upload_does_not_parse_filename_and_ignores_old_entry_keys(temp_dirs):
     client = TestClient(app)
     video_bytes = create_synthetic_video_bytes(num_frames=25, color_offset=77)
 
@@ -300,63 +300,24 @@ def test_library_upload_parses_filename_meta_and_patch(temp_dirs):
     assert resp.status_code == 200
     entry = resp.json()["entry"]
     clip_id = entry["clip_id"]
-    assert entry["reference_decision"] == "out"
-    assert entry["ball_colour_hint"] == "red"
-    assert entry["source_group"] is None
+    assert "reference_decision" not in entry
+    assert "ball_colour_hint" not in entry
+    assert "source_group" not in entry
 
-    # PATCH valid fields
-    patch_resp = client.patch(
-        f"/api/library/{clip_id}",
-        json={
-            "reference_decision": "not_out",
-            "ball_colour_hint": "white",
-            "source_group": "ind_vs_aus",
-        },
-    )
-    assert patch_resp.status_code == 200
-    patched = patch_resp.json()["entry"]
-    assert patched["reference_decision"] == "not_out"
-    assert patched["ball_colour_hint"] == "white"
-    assert patched["source_group"] == "ind_vs_aus"
+    # Legacy library.json entry with extra unknown keys still loads cleanly
+    lib_json = temp_dirs["library_dir"] / "library.json"
+    catalog = json.loads(lib_json.read_text(encoding="utf-8"))
+    catalog[clip_id]["reference_decision"] = "out"
+    catalog[clip_id]["ball_colour_hint"] = "red"
+    catalog[clip_id]["source_group"] = "legacy_series"
+    lib_json.write_text(json.dumps(catalog), encoding="utf-8")
 
-    # Persistence check
-    catalog = load_library_catalog(temp_dirs["library_dir"])
-    assert catalog[clip_id]["reference_decision"] == "not_out"
-    assert catalog[clip_id]["ball_colour_hint"] == "white"
-    assert catalog[clip_id]["source_group"] == "ind_vs_aus"
-
-    # PATCH partial clear (set reference_decision to null, leave others unchanged)
-    patch_clear = client.patch(
-        f"/api/library/{clip_id}",
-        json={"reference_decision": None},
-    )
-    assert patch_clear.status_code == 200
-    assert patch_clear.json()["entry"]["reference_decision"] is None
-    assert patch_clear.json()["entry"]["ball_colour_hint"] == "white"
-
-    # Invalid value -> 422
-    bad_patch = client.patch(
-        f"/api/library/{clip_id}",
-        json={"reference_decision": "maybe"},
-    )
-    assert bad_patch.status_code == 422
-
-    # Unknown field -> 422
-    extra_patch = client.patch(
-        f"/api/library/{clip_id}",
-        json={"unknown_field": 123},
-    )
-    assert extra_patch.status_code == 422
-
-    # Missing clip -> 404
-    missing_patch = client.patch(
-        "/api/library/c_doesnotexist",
-        json={"reference_decision": "out"},
-    )
-    assert missing_patch.status_code == 404
+    assert client.get("/api/library").status_code == 200
+    assert client.get("/api/library/recents").status_code == 200
+    assert any(c["clip_id"] == clip_id for c in client.get("/api/clips").json())
 
 
-def test_put_label_enforces_reference_decision_from_library(temp_dirs):
+def test_label_with_reference_decision_and_source_group_roundtrips(temp_dirs):
     client = TestClient(app)
     video_bytes = create_synthetic_video_bytes(num_frames=30, color_offset=99)
 
@@ -366,23 +327,41 @@ def test_put_label_enforces_reference_decision_from_library(temp_dirs):
     )
     clip_id = resp.json()["entry"]["clip_id"]
 
-    # Client attempts to send wrong reference_decision ("not_out"); backend must overwrite from library entry ("out")
-    payload = {
+    # Write a pre-existing label file containing reference_decision and source_group
+    existing_label = {
         "schema_version": 1,
         "clip_id": clip_id,
+        "split": None,
         "annotator": "tester",
         "mode": "blind",
         "status": "draft",
         "created_at": "2026-11-13T10:00:00Z",
         "updated_at": "2026-11-13T10:00:00Z",
-        "reference_decision": "not_out",
+        "reference_decision": "out",
+        "source_group": "series_2025",
         "impact": {"type": "pad", "frame": 15, "x": 100.0, "y": 100.0},
         "lbw": "not_out_missing",
     }
-    put_resp = client.put(f"/api/clips/{clip_id}/label", json=payload)
+    label_path = temp_dirs["labels_dir"] / f"{clip_id}.json"
+    label_path.write_text(json.dumps(existing_label), encoding="utf-8")
+
+    # GET loads it unchanged
+    loaded = client.get(f"/api/clips/{clip_id}/label")
+    assert loaded.status_code == 200
+    loaded_body = loaded.json()
+    assert loaded_body["reference_decision"] == "out"
+    assert loaded_body["source_group"] == "series_2025"
+
+    # PUT saves it without overwriting or dropping reference_decision / source_group
+    put_resp = client.put(f"/api/clips/{clip_id}/label", json=loaded_body)
     assert put_resp.status_code == 200
-    body = put_resp.json()
-    assert body["label"]["reference_decision"] == "out"
-    assert len(body["warnings"]) == 1
-    assert body["warnings"][0]["message"] == "File name says out but lbw is not out"
+    saved_label = put_resp.json()["label"]
+    assert saved_label["reference_decision"] == "out"
+    assert saved_label["source_group"] == "series_2025"
+
+    # Subsequent GET still matches unchanged
+    reloaded = client.get(f"/api/clips/{clip_id}/label")
+    assert reloaded.status_code == 200
+    assert reloaded.json()["reference_decision"] == "out"
+    assert reloaded.json()["source_group"] == "series_2025"
 

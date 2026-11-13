@@ -545,20 +545,6 @@ export const LabelPanel: FC = () => {
             <option value="final">Final</option>
           </select>
         </div>
-
-        <div className="form-group">
-          <label className="field-label">Source Group</label>
-          <input
-            type="text"
-            className="text-input"
-            placeholder="e.g. match_01"
-            value={label.source_group ?? ''}
-            onChange={(e) => {
-              const val = e.target.value;
-              apply((l) => setMeta(l, 'source_group', val === '' ? null : val, { ghostVisible }));
-            }}
-          />
-        </div>
       </div>
 
       {/* 8. Delivery Flags */}
