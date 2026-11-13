@@ -82,6 +82,100 @@ def _safe_int(val: Any) -> Optional[int]:
         return None
 
 
+def load_ball_detections_csv(csv_path: Path) -> Dict[int, Dict[str, float]]:
+    """Parse ball detection bounding-box rows keyed by frame index from a pipeline CSV."""
+    if not csv_path.is_file():
+        return {}
+    lines = csv_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    header: Optional[List[str]] = None
+    in_ball_section = False
+    out: Dict[int, Dict[str, float]] = {}
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if not stripped:
+            if in_ball_section and header is not None:
+                break
+            continue
+        if stripped.startswith("---"):
+            upper = stripped.upper()
+            if "BALL DETECTIONS" in upper:
+                in_ball_section = True
+                header = None
+                continue
+            if in_ball_section:
+                break
+            continue
+
+        if header is None:
+            cols = [c.strip() for c in next(csv.reader([raw_line]))]
+            if "frame" in cols:
+                header = cols
+                in_ball_section = True
+            continue
+
+        vals = next(csv.reader([raw_line]))
+        row = dict(zip(header, vals))
+        frame_idx = _safe_int(row.get("frame"))
+        if frame_idx is None:
+            continue
+        cls_name = (row.get("class") or "ball").strip().lower()
+        if cls_name and cls_name != "ball":
+            continue
+
+        parsed: Dict[str, float] = {}
+        for col in ("height", "width", "y1", "y2", "cx", "cy"):
+            num = _safe_float(row.get(col))
+            if num is not None:
+                parsed[col] = num
+        if "height" not in parsed and "y2" in parsed and "y1" in parsed:
+            parsed["height"] = parsed["y2"] - parsed["y1"]
+        if parsed and frame_idx not in out:
+            out[frame_idx] = parsed
+
+    return out
+
+
+def _select_system_bounce_centre(
+    raw_traj: Sequence[Any],
+    sys_bounce_frame: Optional[int],
+) -> Tuple[str, Optional[int], Optional[float], Optional[float]]:
+    """Select system ball centre (x, y) at sys_bounce_frame.
+
+    Prefers a non-interpolated point at sys_bounce_frame ("exact").
+    Otherwise falls back to the nearest non-interpolated point within +-1 frame ("approx").
+    Returns (status, frame, x, y) where status is "exact", "approx", or "no_centre".
+    """
+    if sys_bounce_frame is None:
+        return "no_centre", None, None, None
+
+    non_interp_by_frame: Dict[int, Tuple[float, float]] = {}
+    for pt in raw_traj:
+        if not isinstance(pt, dict):
+            continue
+        if bool(pt.get("interpolated", False)):
+            continue
+        f_idx = _safe_int(pt.get("frame"))
+        x_val = _safe_float(pt.get("x"))
+        y_val = _safe_float(pt.get("y"))
+        if f_idx is None or x_val is None or y_val is None:
+            continue
+        if f_idx not in non_interp_by_frame:
+            non_interp_by_frame[f_idx] = (x_val, y_val)
+
+    if sys_bounce_frame in non_interp_by_frame:
+        cx, cy = non_interp_by_frame[sys_bounce_frame]
+        return "exact", sys_bounce_frame, cx, cy
+
+    for delta in (-1, 1):
+        cand_f = sys_bounce_frame + delta
+        if cand_f in non_interp_by_frame:
+            cx, cy = non_interp_by_frame[cand_f]
+            return "approx", cand_f, cx, cy
+
+    return "no_centre", None, None, None
+
+
 def _compute_segment_coverage(
     start_frame: Optional[int],
     end_frame: Optional[int],
@@ -117,6 +211,7 @@ def score_clip(
     *,
     expected_frame_count: Optional[int] = None,
     zones: Optional[Sequence[Tuple[float, float, str]]] = None,
+    detections_by_frame: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Compute per-clip comparison metrics between a ground-truth label and pipeline results.json."""
     active_zones = list(zones) if zones is not None else load_legacy_zones()
@@ -229,11 +324,31 @@ def score_clip(
     system_zone: Optional[str] = None
     zone_match: Optional[bool] = None
 
+    bounce_centre_status: Optional[str] = None
+    bounce_centre_frame: Optional[int] = None
+    bounce_centre_x: Optional[float] = None
+    bounce_centre_y: Optional[float] = None
+    bounce_centre_px_error: Optional[float] = None
+    bounce_centre_dx: Optional[float] = None
+    bounce_centre_dy: Optional[float] = None
+    bounce_centre_wx: Optional[float] = None
+    bounce_centre_wz: Optional[float] = None
+    bounce_centre_ground_error_m: Optional[float] = None
+    bounce_centre_pitch_z_error_m: Optional[float] = None
+    bounce_centre_pitch_x_error_m: Optional[float] = None
+    system_zone_recomputed: Optional[str] = None
+    zone_match_recomputed: Optional[bool] = None
+
+    bounce_marker_dx: Optional[float] = None
+    bounce_marker_dy: Optional[float] = None
+    bounce_det_box_height_px: Optional[float] = None
+    bounce_marker_dy_over_box_height: Optional[float] = None
+
     if has_lbl_bounce:
         lbl_bnc_wx, lbl_bnc_wz = pixel_to_world(H, lbl_bnc_x, lbl_bnc_y)
         label_zone = classify_pitch_z_zone(lbl_bnc_wz, active_zones)
 
-    if has_lbl_bounce and bounce_found:
+    if bounce_found:
         sys_bnc_f = _safe_int(sys_bounce.get("frame"))
         sys_bnc_x = _safe_float(sys_bounce.get("x"))
         sys_bnc_y = _safe_float(sys_bounce.get("y"))
@@ -241,21 +356,68 @@ def score_clip(
         raw_sys_zone = sys_bounce.get("zone")
         system_zone = str(raw_sys_zone) if raw_sys_zone is not None else None
 
-        if sys_bnc_f is not None:
-            bounce_frame_error = sys_bnc_f - lbl_bnc_frame
-        if sys_bnc_x is not None and sys_bnc_y is not None:
-            bounce_px_error = float(math.hypot(sys_bnc_x - lbl_bnc_x, sys_bnc_y - lbl_bnc_y))
-            sys_bnc_wx, sys_bnc_wz = pixel_to_world(H, sys_bnc_x, sys_bnc_y)
-            if lbl_bnc_wx is not None and lbl_bnc_wz is not None:
-                bounce_pitch_x_error_m = float(sys_bnc_wx - lbl_bnc_wx)
-                bounce_pitch_z_error_m = float(sys_bnc_wz - lbl_bnc_wz)
-                bounce_ground_error_m = float(
-                    math.hypot(bounce_pitch_x_error_m, bounce_pitch_z_error_m)
+        (
+            bounce_centre_status,
+            bounce_centre_frame,
+            bounce_centre_x,
+            bounce_centre_y,
+        ) = _select_system_bounce_centre(raw_traj, sys_bnc_f)
+
+        if bounce_centre_x is not None and bounce_centre_y is not None:
+            bounce_centre_wx, bounce_centre_wz = pixel_to_world(H, bounce_centre_x, bounce_centre_y)
+            system_zone_recomputed = classify_pitch_z_zone(bounce_centre_wz, active_zones)
+
+        if detections_by_frame is not None and sys_bnc_f is not None:
+            det_row = detections_by_frame.get(sys_bnc_f)
+            if isinstance(det_row, dict):
+                h_val = _safe_float(det_row.get("height"))
+                if h_val is not None and h_val > 0:
+                    bounce_det_box_height_px = h_val
+
+        if has_lbl_bounce:
+            if sys_bnc_f is not None:
+                bounce_frame_error = sys_bnc_f - lbl_bnc_frame
+            if sys_bnc_x is not None and sys_bnc_y is not None:
+                bounce_marker_dx = float(sys_bnc_x - lbl_bnc_x)
+                bounce_marker_dy = float(sys_bnc_y - lbl_bnc_y)
+                if bounce_det_box_height_px is not None:
+                    bounce_marker_dy_over_box_height = float(
+                        bounce_marker_dy / bounce_det_box_height_px
+                    )
+                bounce_px_error = float(math.hypot(bounce_marker_dx, bounce_marker_dy))
+                sys_bnc_wx, sys_bnc_wz = pixel_to_world(H, sys_bnc_x, sys_bnc_y)
+                if lbl_bnc_wx is not None and lbl_bnc_wz is not None:
+                    bounce_pitch_x_error_m = float(sys_bnc_wx - lbl_bnc_wx)
+                    bounce_pitch_z_error_m = float(sys_bnc_wz - lbl_bnc_wz)
+                    bounce_ground_error_m = float(
+                        math.hypot(bounce_pitch_x_error_m, bounce_pitch_z_error_m)
+                    )
+            if bounce_centre_x is not None and bounce_centre_y is not None:
+                bounce_centre_dx = float(bounce_centre_x - lbl_bnc_x)
+                bounce_centre_dy = float(bounce_centre_y - lbl_bnc_y)
+                bounce_centre_px_error = float(
+                    math.hypot(bounce_centre_dx, bounce_centre_dy)
                 )
-        if sys_length_m is not None and lbl_bnc_wz is not None:
-            sys_length_minus_label_z_m = float(sys_length_m - lbl_bnc_wz)
-        if label_zone is not None and system_zone is not None:
-            zone_match = label_zone == system_zone
+                if (
+                    bounce_centre_wx is not None
+                    and bounce_centre_wz is not None
+                    and lbl_bnc_wx is not None
+                    and lbl_bnc_wz is not None
+                ):
+                    bounce_centre_pitch_x_error_m = float(bounce_centre_wx - lbl_bnc_wx)
+                    bounce_centre_pitch_z_error_m = float(bounce_centre_wz - lbl_bnc_wz)
+                    bounce_centre_ground_error_m = float(
+                        math.hypot(
+                            bounce_centre_pitch_x_error_m,
+                            bounce_centre_pitch_z_error_m,
+                        )
+                    )
+            if sys_length_m is not None and lbl_bnc_wz is not None:
+                sys_length_minus_label_z_m = float(sys_length_m - lbl_bnc_wz)
+            if label_zone is not None and system_zone is not None:
+                zone_match = label_zone == system_zone
+            if label_zone is not None and system_zone_recomputed is not None:
+                zone_match_recomputed = label_zone == system_zone_recomputed
 
     # 3. Impact & Deviation candidate
     lbl_imp_type = str(lbl_impact.get("type") or "none").lower()
@@ -332,6 +494,24 @@ def score_clip(
         "label_zone": label_zone,
         "system_zone": system_zone,
         "zone_match": zone_match,
+        "bounce_centre_status": bounce_centre_status,
+        "bounce_centre_frame": bounce_centre_frame,
+        "bounce_centre_x": bounce_centre_x,
+        "bounce_centre_y": bounce_centre_y,
+        "bounce_centre_px_error": bounce_centre_px_error,
+        "bounce_centre_dx": bounce_centre_dx,
+        "bounce_centre_dy": bounce_centre_dy,
+        "bounce_centre_pitch_x_m": bounce_centre_wx,
+        "bounce_centre_pitch_z_m": bounce_centre_wz,
+        "bounce_centre_ground_error_m": bounce_centre_ground_error_m,
+        "bounce_centre_pitch_z_error_m": bounce_centre_pitch_z_error_m,
+        "bounce_centre_pitch_x_error_m": bounce_centre_pitch_x_error_m,
+        "system_zone_recomputed": system_zone_recomputed,
+        "zone_match_recomputed": zone_match_recomputed,
+        "bounce_marker_dx": bounce_marker_dx,
+        "bounce_marker_dy": bounce_marker_dy,
+        "bounce_det_box_height_px": bounce_det_box_height_px,
+        "bounce_marker_dy_over_box_height": bounce_marker_dy_over_box_height,
         "label_impact_type": lbl_imp_type,
         "has_lbl_impact_contact": has_lbl_impact_contact,
         "sys_impact_present": sys_impact_present,
@@ -517,6 +697,123 @@ def _summarize_slice(
         "n_zone": len(bnc_zone_matches),
     }
 
+    # Bounce Group B: Centre vs centre (excludes unclear clips)
+    c_exact = sum(1 for c in bnc_found if c.get("bounce_centre_status") == "exact")
+    c_approx = sum(1 for c in bnc_found if c.get("bounce_centre_status") == "approx")
+    c_no_centre = sum(1 for c in bnc_found if c.get("bounce_centre_status") == "no_centre")
+    c_px_errs = [
+        float(c["bounce_centre_px_error"])
+        for c in bnc_found
+        if c.get("bounce_centre_px_error") is not None
+    ]
+    c_dx_vals = [
+        float(c["bounce_centre_dx"])
+        for c in bnc_found
+        if c.get("bounce_centre_dx") is not None
+    ]
+    c_dy_vals = [
+        float(c["bounce_centre_dy"])
+        for c in bnc_found
+        if c.get("bounce_centre_dy") is not None
+    ]
+    c_gnd_errs = [
+        float(c["bounce_centre_ground_error_m"])
+        for c in bnc_found
+        if c.get("bounce_centre_ground_error_m") is not None
+    ]
+    c_z_errs = [
+        float(c["bounce_centre_pitch_z_error_m"])
+        for c in bnc_found
+        if c.get("bounce_centre_pitch_z_error_m") is not None
+    ]
+    c_x_errs = [
+        float(c["bounce_centre_pitch_x_error_m"])
+        for c in bnc_found
+        if c.get("bounce_centre_pitch_x_error_m") is not None
+    ]
+    c_zone_matches = [
+        bool(c["zone_match_recomputed"])
+        for c in bnc_found
+        if c.get("zone_match_recomputed") is not None
+    ]
+
+    c_px_med, c_px_p90 = _median_and_p90(c_px_errs)
+    c_dx_med, _ = _median_and_p90(c_dx_vals)
+    c_dy_med, _ = _median_and_p90(c_dy_vals)
+    c_gnd_med, c_gnd_p90 = _median_and_p90(c_gnd_errs)
+    c_z_signed_med, _ = _median_and_p90(c_z_errs)
+    c_z_abs_med, _ = _median_and_p90([abs(e) for e in c_z_errs])
+    c_x_signed_med, _ = _median_and_p90(c_x_errs)
+    c_x_abs_med, _ = _median_and_p90([abs(e) for e in c_x_errs])
+
+    bounce_centre_summary = {
+        "n_labelled": len(bnc_pool),
+        "n_found": len(bnc_found),
+        "n_exact": c_exact,
+        "n_approx": c_approx,
+        "n_no_centre": c_no_centre,
+        "n_with_centre": c_exact + c_approx,
+        "n_frame": len(bnc_f_errs),
+        "frame_error_signed_mean": _mean(bnc_f_errs),
+        "frame_abs_error_median": bnc_f_med,
+        "frame_abs_error_p90": bnc_f_p90,
+        "within_tolerance": _shares_within_tolerances(bnc_f_errs, tolerances),
+        "n": len(c_px_errs),
+        "pixel_error_median": c_px_med,
+        "pixel_error_p90": c_px_p90,
+        "pixel_error_mean": _mean(c_px_errs),
+        "dx_mean": _mean(c_dx_vals),
+        "dx_median": c_dx_med,
+        "dy_mean": _mean(c_dy_vals),
+        "dy_median": c_dy_med,
+        "ground_error_m_median": c_gnd_med,
+        "ground_error_m_p90": c_gnd_p90,
+        "ground_error_m_mean": _mean(c_gnd_errs),
+        "pitch_z_error_m_signed_mean": _mean(c_z_errs),
+        "pitch_z_error_m_signed_median": c_z_signed_med,
+        "pitch_z_error_m_abs_median": c_z_abs_med,
+        "pitch_x_error_m_signed_mean": _mean(c_x_errs),
+        "pitch_x_error_m_signed_median": c_x_signed_med,
+        "pitch_x_error_m_abs_median": c_x_abs_med,
+        "n_zone": len(c_zone_matches),
+        "zone_agreement_rate": (
+            sum(1 for m in c_zone_matches if m) / len(c_zone_matches)
+            if c_zone_matches
+            else None
+        ),
+    }
+
+    # Bounce Group C: Marker offset (as-reported marker minus label)
+    m_dx_vals = [
+        float(c["bounce_marker_dx"])
+        for c in bnc_found
+        if c.get("bounce_marker_dx") is not None
+    ]
+    m_dy_vals = [
+        float(c["bounce_marker_dy"])
+        for c in bnc_found
+        if c.get("bounce_marker_dy") is not None
+    ]
+    m_ratio_vals = [
+        float(c["bounce_marker_dy_over_box_height"])
+        for c in bnc_found
+        if c.get("bounce_marker_dy_over_box_height") is not None
+    ]
+    m_dx_med, _ = _median_and_p90(m_dx_vals)
+    m_dy_med, _ = _median_and_p90(m_dy_vals)
+    m_ratio_med, _ = _median_and_p90(m_ratio_vals)
+
+    bounce_marker_offset_summary = {
+        "n": len(m_dx_vals),
+        "dx_mean": _mean(m_dx_vals),
+        "dx_median": m_dx_med,
+        "dy_mean": _mean(m_dy_vals),
+        "dy_median": m_dy_med,
+        "n_with_box_height": len(m_ratio_vals),
+        "dy_over_box_height_mean": _mean(m_ratio_vals),
+        "dy_over_box_height_median": m_ratio_med,
+    }
+
     # Impact & Deviation candidate (excludes unclear clips)
     imp_all = clear
     sys_imp_count = sum(1 for c in imp_all if c.get("sys_impact_present"))
@@ -607,6 +904,9 @@ def _summarize_slice(
         "trajectory_coverage": cov_summary,
         "release": release_summary,
         "bounce": bounce_summary,
+        "bounce_as_reported": bounce_summary,
+        "bounce_centre_vs_centre": bounce_centre_summary,
+        "bounce_marker_offset": bounce_marker_offset_summary,
         "impact": impact_summary,
         "lbw": "n/a (not implemented in the system)",
         "runtime": runtime_summary,
@@ -616,12 +916,14 @@ def _summarize_slice(
 def _build_zone_confusion(
     clips: Sequence[Dict[str, Any]],
     zone_names: Sequence[str],
+    *,
+    sys_zone_key: str = "system_zone",
 ) -> Dict[str, Any]:
     ordered_labels = list(zone_names)
     for c in clips:
         if c.get("has_results") and not c.get("frame_count_mismatch") and not c.get("is_unclear"):
             lz = c.get("label_zone")
-            sz = c.get("system_zone")
+            sz = c.get(sys_zone_key)
             if lz and lz not in ordered_labels:
                 ordered_labels.append(lz)
             if sz and sz not in ordered_labels:
@@ -640,7 +942,7 @@ def _build_zone_confusion(
         ):
             continue
         lz = c.get("label_zone")
-        sz = c.get("system_zone")
+        sz = c.get(sys_zone_key)
         if lz is not None and sz is not None:
             matrix[lz][sz] = matrix.get(lz, {}).get(sz, 0) + 1
             n_scored += 1
@@ -791,7 +1093,12 @@ def aggregate_scores(
         "overall": overall,
         "by_ball_colour": by_ball_colour,
         "by_split": by_split,
-        "zone_confusion": _build_zone_confusion(clip_scores, zone_names),
+        "zone_confusion": _build_zone_confusion(
+            clip_scores, zone_names, sys_zone_key="system_zone"
+        ),
+        "zone_confusion_recomputed": _build_zone_confusion(
+            clip_scores, zone_names, sys_zone_key="system_zone_recomputed"
+        ),
         "calibration_quality": _build_calibration_quality(clip_scores),
         "unclear_clips": unclear_clips,
         "worst_5_per_metric": _build_worst_5(clip_scores),
@@ -843,9 +1150,27 @@ def format_per_clip_csv(clip_scores: Sequence[Dict[str, Any]]) -> str:
         "bounce_pitch_x_error_m",
         "system_length_m",
         "sys_length_minus_label_z_m",
+        "bounce_centre_status",
+        "bounce_centre_frame",
+        "bounce_centre_x",
+        "bounce_centre_y",
+        "bounce_centre_px_error",
+        "bounce_centre_dx",
+        "bounce_centre_dy",
+        "bounce_centre_pitch_x_m",
+        "bounce_centre_pitch_z_m",
+        "bounce_centre_ground_error_m",
+        "bounce_centre_pitch_z_error_m",
+        "bounce_centre_pitch_x_error_m",
+        "bounce_marker_dx",
+        "bounce_marker_dy",
+        "bounce_det_box_height_px",
+        "bounce_marker_dy_over_box_height",
         "label_zone",
         "system_zone",
         "zone_match",
+        "system_zone_recomputed",
+        "zone_match_recomputed",
         "label_impact_type",
         "sys_impact_present",
         "deviation_present",
@@ -906,10 +1231,31 @@ def format_markdown_report(summary: Dict[str, Any], run_name: str) -> str:
                 f"(label/library={m['expected_frame_count']}, results={m['results_frame_count']})"
             )
     lines.append("")
+    lines.append("## Conventions")
+    lines.append("")
+    lines.append(
+        "- **As reported**: Compares `events.bounce` (`frame`, `x`, `y`, `zone`) in `results.json` directly against the human-labelled bounce centre. "
+        "Note that the tracker writes the ball bounding-box bottom edge (`y2`) as `events.bounce.y`."
+    )
+    lines.append(
+        "- **Centre vs centre**: Uses the system ball trajectory centre `(x, y)` at `events.bounce.frame` (preferring non-interpolated points; "
+        "`approx` falls back to the nearest non-interpolated point within `±1` frame; `no_centre` if none exists), and projects both system centre and label centre through the ground-truth homography. "
+        "Signed errors are `system - label` (`+dx` = right, `+dy` = lower on screen, `+pitch_z_m` = further down pitch toward bowling end)."
+    )
+    lines.append(
+        "- **Marker offset**: Signed pixel offset `as_reported_marker - label` (`dx`, `dy`), plus `dy / box_height` using the ball detection bounding-box `height` at `events.bounce.frame` from the detections CSV (expected `~ +0.5` when the marker sits at `y2` and both detect the same ball)."
+    )
+    lines.append(
+        "- **Zones**: `label_zone` is classified from the human bounce centre `pitch_z_m` through the GT homography (`Zone-div_V8m/zones.py` thresholds); "
+        "`system_zone` is `events.bounce.zone` as reported; `system_zone_recomputed` is classified from the system trajectory centre pixel through the GT homography."
+    )
+    lines.append("")
 
     # Headline Table
     rel = ov["release"]
     bnc = ov["bounce"]
+    bnc_cc = ov["bounce_centre_vs_centre"]
+    bnc_mo = ov["bounce_marker_offset"]
     imp = ov["impact"]
     rt = ov["runtime"]
     cov_ri = ov["trajectory_coverage"]["release_to_impact"]
@@ -943,38 +1289,92 @@ def format_markdown_report(summary: Dict[str, Any], run_name: str) -> str:
         f"{_fmt_num(rel['pixel_error_median'], 1, ' px')} / {_fmt_num(rel['pixel_error_p90'], 1, ' px')} |"
     )
     lines.append(
-        f"| Bounce found rate (excl. unclear) | {bnc['n_labelled']} | "
+        f"| **Bounce — As reported**: found rate (excl. unclear) | {bnc['n_labelled']} | "
         f"{bnc['n_found']}/{bnc['n_labelled']} ({_fmt_pct(bnc['found_rate'])}) |"
     )
     lines.append(
-        f"| Bounce frame error (`0` / `±{t1}` / `±{t2}` frames) | {bnc['n']} | "
+        f"| **Bounce — As reported**: frame error (`0` / `±{t1}` / `±{t2}` frames) | {bnc['n']} | "
         f"{_fmt_pct(bnc['within_tolerance'].get(t0))} / "
         f"{_fmt_pct(bnc['within_tolerance'].get(t1))} / "
         f"{_fmt_pct(bnc['within_tolerance'].get(t2))} "
         f"(med\\|err\\|={_fmt_num(bnc['frame_abs_error_median'], 1)}, p90={_fmt_num(bnc['frame_abs_error_p90'], 1)}) |"
     )
     lines.append(
-        f"| Bounce pixel distance (median / p90) | {bnc['n']} | "
+        f"| **Bounce — As reported**: pixel distance (median / p90) | {bnc['n']} | "
         f"{_fmt_num(bnc['pixel_error_median'], 1, ' px')} / {_fmt_num(bnc['pixel_error_p90'], 1, ' px')} |"
     )
     lines.append(
-        f"| Bounce ground error in metres (median / p90) | {bnc['n']} | "
+        f"| **Bounce — As reported**: ground error in metres (median / p90) | {bnc['n']} | "
         f"{_fmt_num(bnc['ground_error_m_median'], 3, ' m')} / {_fmt_num(bnc['ground_error_m_p90'], 3, ' m')} |"
     )
     lines.append(
-        f"| Bounce `pitch_z_m` error (signed mean / median abs) | {bnc['n']} | "
+        f"| **Bounce — As reported**: `pitch_z_m` error (signed mean / median abs) | {bnc['n']} | "
         f"{_fmt_num(bnc['pitch_z_error_m_signed_mean'], 3, ' m')} / {_fmt_num(bnc['pitch_z_error_m_abs_median'], 3, ' m')} |"
     )
     lines.append(
-        f"| Bounce `pitch_x_m` error (signed mean / median abs) | {bnc['n']} | "
+        f"| **Bounce — As reported**: `pitch_x_m` error (signed mean / median abs) | {bnc['n']} | "
         f"{_fmt_num(bnc['pitch_x_error_m_signed_mean'], 3, ' m')} / {_fmt_num(bnc['pitch_x_error_m_abs_median'], 3, ' m')} |"
     )
     lines.append(
-        f"| System `length_m` minus labelled `pitch_z_m` (signed mean / median) | {bnc['n']} | "
+        f"| **Bounce — As reported**: system `length_m` minus label `pitch_z_m` (signed mean / median) | {bnc['n']} | "
         f"{_fmt_num(bnc['sys_length_minus_label_z_m_signed_mean'], 3, ' m')} / {_fmt_num(bnc['sys_length_minus_label_z_m_median'], 3, ' m')} |"
     )
     lines.append(
-        f"| Bounce zone agreement | {bnc['n_zone']} | {_fmt_pct(bnc['zone_agreement_rate'])} |"
+        f"| **Bounce — As reported**: zone agreement | {bnc['n_zone']} | {_fmt_pct(bnc['zone_agreement_rate'])} |"
+    )
+    lines.append(
+        f"| **Bounce — Centre vs centre**: centre availability (`exact` / `approx` / `no_centre`) | {bnc_cc['n_found']} | "
+        f"`{bnc_cc['n_exact']}` / `{bnc_cc['n_approx']}` / `{bnc_cc['n_no_centre']}` |"
+    )
+    lines.append(
+        f"| **Bounce — Centre vs centre**: frame error (`0` / `±{t1}` / `±{t2}` frames) | {bnc_cc['n_frame']} | "
+        f"{_fmt_pct(bnc_cc['within_tolerance'].get(t0))} / "
+        f"{_fmt_pct(bnc_cc['within_tolerance'].get(t1))} / "
+        f"{_fmt_pct(bnc_cc['within_tolerance'].get(t2))} "
+        f"(med\\|err\\|={_fmt_num(bnc_cc['frame_abs_error_median'], 1)}, p90={_fmt_num(bnc_cc['frame_abs_error_p90'], 1)}) |"
+    )
+    lines.append(
+        f"| **Bounce — Centre vs centre**: pixel distance (median / p90) | {bnc_cc['n']} | "
+        f"{_fmt_num(bnc_cc['pixel_error_median'], 1, ' px')} / {_fmt_num(bnc_cc['pixel_error_p90'], 1, ' px')} |"
+    )
+    lines.append(
+        f"| **Bounce — Centre vs centre**: signed `dx` (mean / median) | {bnc_cc['n']} | "
+        f"{_fmt_num(bnc_cc['dx_mean'], 2, ' px')} / {_fmt_num(bnc_cc['dx_median'], 2, ' px')} |"
+    )
+    lines.append(
+        f"| **Bounce — Centre vs centre**: signed `dy` (mean / median) | {bnc_cc['n']} | "
+        f"{_fmt_num(bnc_cc['dy_mean'], 2, ' px')} / {_fmt_num(bnc_cc['dy_median'], 2, ' px')} |"
+    )
+    lines.append(
+        f"| **Bounce — Centre vs centre**: ground error in metres (median / p90) | {bnc_cc['n']} | "
+        f"{_fmt_num(bnc_cc['ground_error_m_median'], 3, ' m')} / {_fmt_num(bnc_cc['ground_error_m_p90'], 3, ' m')} |"
+    )
+    lines.append(
+        f"| **Bounce — Centre vs centre**: `pitch_z_m` error (signed mean / median / median abs) | {bnc_cc['n']} | "
+        f"{_fmt_num(bnc_cc['pitch_z_error_m_signed_mean'], 3, ' m')} / "
+        f"{_fmt_num(bnc_cc['pitch_z_error_m_signed_median'], 3, ' m')} / "
+        f"{_fmt_num(bnc_cc['pitch_z_error_m_abs_median'], 3, ' m')} |"
+    )
+    lines.append(
+        f"| **Bounce — Centre vs centre**: `pitch_x_m` error (signed mean / median / median abs) | {bnc_cc['n']} | "
+        f"{_fmt_num(bnc_cc['pitch_x_error_m_signed_mean'], 3, ' m')} / "
+        f"{_fmt_num(bnc_cc['pitch_x_error_m_signed_median'], 3, ' m')} / "
+        f"{_fmt_num(bnc_cc['pitch_x_error_m_abs_median'], 3, ' m')} |"
+    )
+    lines.append(
+        f"| **Bounce — Centre vs centre**: recomputed zone agreement | {bnc_cc['n_zone']} | {_fmt_pct(bnc_cc['zone_agreement_rate'])} |"
+    )
+    lines.append(
+        f"| **Bounce — Marker offset**: signed `dx` (`marker - label`, mean / median) | {bnc_mo['n']} | "
+        f"{_fmt_num(bnc_mo['dx_mean'], 2, ' px')} / {_fmt_num(bnc_mo['dx_median'], 2, ' px')} |"
+    )
+    lines.append(
+        f"| **Bounce — Marker offset**: signed `dy` (`marker - label`, mean / median) | {bnc_mo['n']} | "
+        f"{_fmt_num(bnc_mo['dy_mean'], 2, ' px')} / {_fmt_num(bnc_mo['dy_median'], 2, ' px')} |"
+    )
+    lines.append(
+        f"| **Bounce — Marker offset**: `dy / box_height` (median / mean) | {bnc_mo['n_with_box_height']} | "
+        f"{_fmt_num(bnc_mo['dy_over_box_height_median'], 3)} / {_fmt_num(bnc_mo['dy_over_box_height_mean'], 3)} |"
     )
     lines.append(
         f"| Impact (`events.impact` non-null share) | {imp['n_clips']} | "
@@ -1018,7 +1418,7 @@ def format_markdown_report(summary: Dict[str, Any], run_name: str) -> str:
         lines.append("")
         lines.append(
             f"| Slice | n (valid / clear) | Cov `[rel,imp]` | Release Found | Rel `±{t1}f` | Rel Med px | "
-            f"Bounce Found | Bnc `±{t1}f` | Bnc Med m | Dev on Contact | Dev `±{t1}f` | Dev Med px | Runtime Med |"
+            f"Bounce Found | Bnc `±{t1}f` | Bnc Med m (rep / ctr) | Dev on Contact | Dev `±{t1}f` | Dev Med px | Runtime Med |"
         )
         lines.append(
             "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
@@ -1026,6 +1426,7 @@ def format_markdown_report(summary: Dict[str, Any], run_name: str) -> str:
         for name, s in groups.items():
             r_s = s["release"]
             b_s = s["bounce"]
+            bc_s = s["bounce_centre_vs_centre"]
             i_s = s["impact"]
             t_s = s["runtime"]
             c_ri_s = s["trajectory_coverage"]["release_to_impact"]
@@ -1037,7 +1438,7 @@ def format_markdown_report(summary: Dict[str, Any], run_name: str) -> str:
                 f"{_fmt_num(r_s['pixel_error_median'], 1)} | "
                 f"{b_s['n_found']}/{b_s['n_labelled']} | "
                 f"{_fmt_pct(b_s['within_tolerance'].get(t1))} | "
-                f"{_fmt_num(b_s['ground_error_m_median'], 3)} | "
+                f"{_fmt_num(b_s['ground_error_m_median'], 3)} / {_fmt_num(bc_s['ground_error_m_median'], 3)} | "
                 f"{i_s['n_deviation_on_contact']}/{i_s['n_contact_labelled']} | "
                 f"{_fmt_pct(i_s['deviation_within_tolerance'].get(t1))} | "
                 f"{_fmt_num(i_s['deviation_pixel_error_median'], 1)} | "
@@ -1052,11 +1453,12 @@ def format_markdown_report(summary: Dict[str, Any], run_name: str) -> str:
     lines.append("### 3.3 Per-Clip Detail Table")
     lines.append("")
     lines.append(
-        "| Clip ID | Ball | Split | Unclear | Rel Err (f / px) | Bnc Err (f / px / m) | "
-        "`pitch_z` Err (m) | `pitch_x` Err (m) | `sys.length - lbl.z` (m) | Zone (`lbl` -> `sys`) | Dev vs Imp (f / px) | Runtime (s) |"
+        "| Clip ID | Ball | Split | Unclear | Rel Err (f / px) | As-rep Bnc (f / px / m) | "
+        "Centre vs Centre (`status`: `dx`,`dy` / px / m) | Marker Offset (`dx`,`dy` / `dy/h`) | "
+        "`pitch_z` Err rep/ctr (m) | Zone (`lbl` -> `rep` / `recomp`) | Dev vs Imp (f / px) | Runtime (s) |"
     )
     lines.append(
-        "| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- | ---: |"
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: |"
     )
     for c in summary["per_clip"]:
         rel_str = (
@@ -1070,6 +1472,24 @@ def format_markdown_report(summary: Dict[str, Any], run_name: str) -> str:
             if c.get("bounce_found")
             else "missed"
         )
+        c_status = c.get("bounce_centre_status")
+        if not c.get("bounce_found"):
+            cc_str = "missed"
+        elif c_status == "no_centre":
+            cc_str = "`no_centre`"
+        else:
+            cc_str = (
+                f"`{c_status}`: {_fmt_num(c.get('bounce_centre_dx'), 1)},{_fmt_num(c.get('bounce_centre_dy'), 1)} / "
+                f"{_fmt_num(c.get('bounce_centre_px_error'), 1)}px / "
+                f"{_fmt_num(c.get('bounce_centre_ground_error_m'), 3)}m"
+            )
+        if not c.get("bounce_found"):
+            mo_str = "missed"
+        else:
+            mo_str = (
+                f"{_fmt_num(c.get('bounce_marker_dx'), 1)},{_fmt_num(c.get('bounce_marker_dy'), 1)} / "
+                f"{_fmt_num(c.get('bounce_marker_dy_over_box_height'), 2)}"
+            )
         dev_str = (
             f"{c.get('deviation_frame_error')}f / {_fmt_num(c.get('deviation_px_error'), 1)}px"
             if c.get("deviation_present") and c.get("has_lbl_impact_contact")
@@ -1078,18 +1498,18 @@ def format_markdown_report(summary: Dict[str, Any], run_name: str) -> str:
         lines.append(
             f"| `{c['clip_id']}` | `{c['ball_colour']}` | `{c['split']}` | "
             f"`{'yes' if c.get('is_unclear') else 'no'}` | {rel_str} | {bnc_str} | "
-            f"{_fmt_num(c.get('bounce_pitch_z_error_m'), 3)} | "
-            f"{_fmt_num(c.get('bounce_pitch_x_error_m'), 3)} | "
-            f"{_fmt_num(c.get('sys_length_minus_label_z_m'), 3)} | "
-            f"`{c.get('label_zone') or '—'}` -> `{c.get('system_zone') or '—'}` | "
+            f"{cc_str} | {mo_str} | "
+            f"{_fmt_num(c.get('bounce_pitch_z_error_m'), 3)} / {_fmt_num(c.get('bounce_centre_pitch_z_error_m'), 3)} | "
+            f"`{c.get('label_zone') or '—'}` -> `{c.get('system_zone') or '—'}` / `{c.get('system_zone_recomputed') or '—'}` | "
             f"{dev_str} | {_fmt_num(c.get('processing_time_sec'), 2)} |"
         )
     lines.append("")
 
     # 3.4 Zone Confusion Table
-    zc = summary["zone_confusion"]
-    z_list = zc["zones"]
-    lines.append("### 3.4 Bounce Zone Confusion Matrix (Labelled Zone Rows vs System Zone Columns)")
+    zc_rep = summary["zone_confusion"]
+    zc_rec = summary["zone_confusion_recomputed"]
+    z_list = zc_rec["zones"]
+    lines.append("### 3.4 Bounce Zone Agreement & Confusion Matrix (Recomputed from System Centre)")
     lines.append("")
     lines.append(
         f"Thresholds loaded at runtime from `backend/worker/legacy/Zone-div_V8m/zones.py`: "
@@ -1099,17 +1519,20 @@ def format_markdown_report(summary: Dict[str, Any], run_name: str) -> str:
         )
     )
     lines.append("")
-    header = "| Labelled \\\\ System | " + " | ".join(f"`{z}`" for z in z_list) + " |"
+    lines.append(
+        f"- **System zone (as reported) agreement**: `{zc_rep['agreement_count']}/{zc_rep['n']}` ({_fmt_pct(zc_rep['agreement_rate'])})"
+    )
+    lines.append(
+        f"- **System zone (recomputed from system centre) agreement**: `{zc_rec['agreement_count']}/{zc_rec['n']}` ({_fmt_pct(zc_rec['agreement_rate'])})"
+    )
+    lines.append("")
+    header = "| Labelled \\\\ System Recomputed | " + " | ".join(f"`{z}`" for z in z_list) + " |"
     sep = "| --- | " + " | ".join("---:" for _ in z_list) + " |"
     lines.append(header)
     lines.append(sep)
     for lz in z_list:
-        row_cells = [str(zc["matrix"].get(lz, {}).get(sz, 0)) for sz in z_list]
+        row_cells = [str(zc_rec["matrix"].get(lz, {}).get(sz, 0)) for sz in z_list]
         lines.append(f"| **`{lz}`** | " + " | ".join(row_cells) + " |")
-    lines.append("")
-    lines.append(
-        f"Zone agreement: `{zc['agreement_count']}/{zc['n']}` ({_fmt_pct(zc['agreement_rate'])})"
-    )
     lines.append("")
 
     # 3.5 Calibration Quality

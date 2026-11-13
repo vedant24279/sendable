@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import math
 from pathlib import Path
@@ -9,12 +10,16 @@ from typing import Any, Dict
 
 import pytest
 
-from app.calib import fit_homography, world_to_pixel
+from app.calib import fit_homography, pixel_to_world, world_to_pixel
 from run_batch import build_rounded_calibration, run_batch
+from score import main as score_main
 from score import run_scoring
 from scoring import (
     aggregate_scores,
     classify_pitch_z_zone,
+    format_markdown_report,
+    format_per_clip_csv,
+    load_ball_detections_csv,
     load_legacy_zones,
     score_clip,
 )
@@ -395,6 +400,299 @@ def test_run_batch_dry_run_and_score_e2e(tmp_path: Path) -> None:
     assert summary["overall"]["bounce"]["within_tolerance"]["1"] == pytest.approx(1.0)
     assert summary["overall"]["impact"]["deviation_within_tolerance"]["0"] == pytest.approx(1.0)
     md_text = md_path.read_text(encoding="utf-8")
+    assert "## Conventions" in md_text
     assert "## 2. Headline Table (Overall)" in md_text
     assert "## 4. Worst 5 Clips per Metric" in md_text
     assert "## 5. Caveats" in md_text
+
+
+def test_centre_vs_centre_marker_offset_approx_no_centre_and_zones(tmp_path: Path) -> None:
+    zones = load_legacy_zones()
+    calib_gt = _make_synthetic_calibration_gt(True, True, 0.5)
+    H = fit_homography(calib_gt["points"], calib_gt["stump_confirmed"]).H
+
+    # Label bounce at world (0.10, 7.0) -> GOOD ([4.0, 8.0))
+    lx, lz = 0.10, 7.0
+    lbl_px = world_to_pixel(H, lx, lz)
+    assert lbl_px is not None
+    lbl_x, lbl_y = lbl_px
+
+    # Exact centre at world (0.25, 3.5) -> FULL ([2.0, 4.0))
+    # While as-reported marker is further down on screen (+10 px in y -> marker y = cy + 10)
+    cx1, cz1 = 0.25, 3.5
+    c1_px = world_to_pixel(H, cx1, cz1)
+    assert c1_px is not None
+    c1_x, c1_y = c1_px
+    marker1_x, marker1_y = c1_x + 2.0, c1_y + 10.0  # box height = 20 -> marker dy depends on lbl_y
+
+    # Write synthetic pipeline detections CSV with section headers
+    csv_path = tmp_path / "detections_synth.csv"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "--- BALL DETECTIONS ---",
+                "frame,timestamp_sec,event_type,class,conf,x1,y1,x2,y2,cx,cy,width,height,grid_row,grid_col",
+                f"15,0.5,detection,ball,0.8,440,590,460,610,{c1_x},{c1_y},20,20,60,10",
+                "",
+                "--- BAT DETECTIONS ---",
+                "frame,timestamp_sec,event_type,class,conf,x1,y1,x2,y2,cx,cy,width,height,grid_row,grid_col",
+                "15,0.5,detection,bat,0.9,400,700,450,780,425,740,50,80,,",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dets = load_ball_detections_csv(csv_path)
+    assert dets[15]["height"] == pytest.approx(20.0)
+    assert dets[15]["y2"] == pytest.approx(610.0)
+    assert dets[15]["cy"] == pytest.approx(c1_y)
+
+    label_base = {
+        "schema_version": 1,
+        "clip_id": "c_exact",
+        "status": "final",
+        "split": "dev",
+        "ball_colour": "pink",
+        "release": {"frame": 5, "x": lbl_x, "y": lbl_y},
+        "bounce": {"frame": 15, "x": lbl_x, "y": lbl_y, "kind": "pitch"},
+        "impact": {"frame": 22, "x": lbl_x, "y": lbl_y, "type": "none"},
+        "last_visible_frame": 25,
+        "flags": [],
+        "calibration_gt": calib_gt,
+    }
+
+    # Case 1: "exact" (non-interpolated at bounce frame 15; marker zone says GOOD while recomputed says YORKER)
+    res_exact = {
+        "video": {"fps": 30.0, "width": 1080, "height": 1920, "frame_count": 30},
+        "events": {
+            "release": {"frame": 5, "x": lbl_x, "y": lbl_y},
+            "bounce": {"frame": 15, "x": marker1_x, "y": marker1_y, "zone": "GOOD", "length_m": 6.5},
+            "deviation": None,
+            "impact": None,
+        },
+        "trajectory": [
+            {"frame": 14, "x": c1_x - 5.0, "y": c1_y - 5.0, "interpolated": False},
+            {"frame": 15, "x": c1_x, "y": c1_y, "interpolated": False},
+        ],
+        "stats": {"processing_time_sec": 5.0},
+    }
+    sc_exact = score_clip(
+        label_base,
+        res_exact,
+        expected_frame_count=30,
+        zones=zones,
+        detections_by_frame=dets,
+    )
+    expected_c_wx, expected_c_wz = pixel_to_world(H, c1_x, c1_y)
+    assert expected_c_wx is not None and expected_c_wz is not None
+    expected_lbl_wx, expected_lbl_wz = pixel_to_world(H, lbl_x, lbl_y)
+    assert expected_lbl_wx is not None and expected_lbl_wz is not None
+
+    assert sc_exact["bounce_centre_status"] == "exact"
+    assert sc_exact["bounce_centre_frame"] == 15
+    assert sc_exact["bounce_centre_dx"] == pytest.approx(c1_x - lbl_x, abs=1e-6)
+    assert sc_exact["bounce_centre_dy"] == pytest.approx(c1_y - lbl_y, abs=1e-6)
+    assert sc_exact["bounce_centre_px_error"] == pytest.approx(math.hypot(c1_x - lbl_x, c1_y - lbl_y), abs=1e-6)
+    assert sc_exact["bounce_centre_pitch_x_error_m"] == pytest.approx(expected_c_wx - expected_lbl_wx, abs=1e-6)
+    assert sc_exact["bounce_centre_pitch_z_error_m"] == pytest.approx(expected_c_wz - expected_lbl_wz, abs=1e-6)
+    assert sc_exact["bounce_centre_ground_error_m"] == pytest.approx(
+        math.hypot(expected_c_wx - expected_lbl_wx, expected_c_wz - expected_lbl_wz), abs=1e-6
+    )
+    assert sc_exact["label_zone"] == "GOOD"
+    assert sc_exact["system_zone"] == "GOOD"
+    assert sc_exact["zone_match"] is True
+    assert sc_exact["system_zone_recomputed"] == classify_pitch_z_zone(expected_c_wz, zones) == "FULL"
+    assert sc_exact["zone_match_recomputed"] is False
+
+    assert sc_exact["bounce_marker_dx"] == pytest.approx(marker1_x - lbl_x, abs=1e-6)
+    assert sc_exact["bounce_marker_dy"] == pytest.approx(marker1_y - lbl_y, abs=1e-6)
+    assert sc_exact["bounce_det_box_height_px"] == pytest.approx(20.0)
+    assert sc_exact["bounce_marker_dy_over_box_height"] == pytest.approx((marker1_y - lbl_y) / 20.0, abs=1e-6)
+
+    # Case 2: "approx" (frame 15 is interpolated=True, frame 16 is non-interpolated -> picks 16)
+    res_approx = {
+        "video": {"fps": 30.0, "width": 1080, "height": 1920, "frame_count": 30},
+        "events": {
+            "release": {"frame": 5, "x": lbl_x, "y": lbl_y},
+            "bounce": {"frame": 15, "x": lbl_x, "y": lbl_y + 10.0, "zone": "YORKER", "length_m": 6.5},
+            "deviation": None,
+            "impact": None,
+        },
+        "trajectory": [
+            {"frame": 15, "x": 999.0, "y": 999.0, "interpolated": True},
+            {"frame": 16, "x": lbl_x + 4.0, "y": lbl_y - 3.0, "interpolated": False},
+        ],
+        "stats": {"processing_time_sec": 4.0},
+    }
+    sc_approx = score_clip(
+        dict(label_base, clip_id="c_approx"),
+        res_approx,
+        expected_frame_count=30,
+        zones=zones,
+        detections_by_frame=dets,
+    )
+    assert sc_approx["bounce_centre_status"] == "approx"
+    assert sc_approx["bounce_centre_frame"] == 16
+    assert sc_approx["bounce_centre_dx"] == pytest.approx(4.0, abs=1e-6)
+    assert sc_approx["bounce_centre_dy"] == pytest.approx(-3.0, abs=1e-6)
+    assert sc_approx["bounce_centre_px_error"] == pytest.approx(5.0, abs=1e-6)
+    assert sc_approx["bounce_marker_dy"] == pytest.approx(10.0, abs=1e-6)
+    assert sc_approx["bounce_marker_dy_over_box_height"] == pytest.approx(0.5, abs=1e-6)
+    assert sc_approx["system_zone"] == "YORKER"
+    assert sc_approx["zone_match"] is False
+    assert sc_approx["system_zone_recomputed"] == "GOOD"
+    assert sc_approx["zone_match_recomputed"] is True
+
+    # Case 3: "no_centre" (only frame 15 interpolated and frame 17 non-interpolated outside +-1)
+    res_none = {
+        "video": {"fps": 30.0, "width": 1080, "height": 1920, "frame_count": 30},
+        "events": {
+            "release": {"frame": 5, "x": lbl_x, "y": lbl_y},
+            "bounce": {"frame": 15, "x": lbl_x + 2.0, "y": lbl_y + 8.0, "zone": "GOOD", "length_m": 6.5},
+            "deviation": None,
+            "impact": None,
+        },
+        "trajectory": [
+            {"frame": 15, "x": 999.0, "y": 999.0, "interpolated": True},
+            {"frame": 17, "x": lbl_x, "y": lbl_y, "interpolated": False},
+        ],
+        "stats": {"processing_time_sec": 3.0},
+    }
+    sc_none = score_clip(
+        dict(label_base, clip_id="c_nocentre"),
+        res_none,
+        expected_frame_count=30,
+        zones=zones,
+        detections_by_frame=dets,
+    )
+    assert sc_none["bounce_centre_status"] == "no_centre"
+    assert sc_none["bounce_centre_x"] is None
+    assert sc_none["bounce_centre_dx"] is None
+    assert sc_none["system_zone_recomputed"] is None
+    assert sc_none["zone_match_recomputed"] is None
+
+    summary = aggregate_scores([sc_exact, sc_approx, sc_none], zones=zones)
+    ov_cc = summary["overall"]["bounce_centre_vs_centre"]
+    assert ov_cc["n_found"] == 3
+    assert ov_cc["n_exact"] == 1
+    assert ov_cc["n_approx"] == 1
+    assert ov_cc["n_no_centre"] == 1
+    assert ov_cc["n"] == 2
+    assert ov_cc["dx_mean"] == pytest.approx(((c1_x - lbl_x) + 4.0) / 2.0, abs=1e-6)
+    assert ov_cc["dy_mean"] == pytest.approx(((c1_y - lbl_y) - 3.0) / 2.0, abs=1e-6)
+    # Recomputed zone agrees on c_approx only (1/2 = 0.5); as-reported agrees on c_exact & c_nocentre (2/3)
+    assert ov_cc["zone_agreement_rate"] == pytest.approx(0.5, abs=1e-6)
+    assert summary["overall"]["bounce"]["zone_agreement_rate"] == pytest.approx(2.0 / 3.0, abs=1e-6)
+
+    zc_rec = summary["zone_confusion_recomputed"]
+    assert zc_rec["n"] == 2
+    assert zc_rec["agreement_count"] == 1
+    assert zc_rec["matrix"]["GOOD"]["GOOD"] == 1
+    assert zc_rec["matrix"]["GOOD"]["FULL"] == 1
+
+    ov_mo = summary["overall"]["bounce_marker_offset"]
+    assert ov_mo["n"] == 3
+    assert ov_mo["n_with_box_height"] == 3
+    expected_dy_ratios = sorted(
+        [(marker1_y - lbl_y) / 20.0, 10.0 / 20.0, 8.0 / 20.0]
+    )
+    assert ov_mo["dy_over_box_height_median"] == pytest.approx(expected_dy_ratios[1], abs=1e-6)
+
+    csv_text = format_per_clip_csv([sc_exact, sc_approx, sc_none])
+    rows = list(csv.DictReader(csv_text.splitlines()))
+    assert len(rows) == 3
+    assert rows[0]["bounce_centre_status"] == "exact"
+    assert rows[1]["bounce_centre_status"] == "approx"
+    assert rows[2]["bounce_centre_status"] == "no_centre"
+    assert float(rows[1]["bounce_marker_dy_over_box_height"]) == pytest.approx(0.5, abs=1e-6)
+    assert rows[0]["system_zone_recomputed"] == "FULL"
+
+
+def test_score_cli_out_name_and_detections_csv(tmp_path: Path) -> None:
+    labels_dir = tmp_path / "labels"
+    library_dir = tmp_path / "library"
+    runs_dir = tmp_path / "runs"
+    reports_dir = tmp_path / "reports"
+    labels_dir.mkdir()
+    library_dir.mkdir()
+    clip_run_dir = runs_dir / "orig_run" / "c_cli01"
+    clip_run_dir.mkdir(parents=True)
+
+    (library_dir / "library.json").write_text(
+        json.dumps({"c_cli01": {"clip_id": "c_cli01", "frame_count": 30}}),
+        encoding="utf-8",
+    )
+    calib_gt = _make_synthetic_calibration_gt(True, True, 0.5)
+    H = fit_homography(calib_gt["points"], calib_gt["stump_confirmed"]).H
+    bx, by = world_to_pixel(H, 0.0, 6.0)
+    (labels_dir / "c_cli01.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "clip_id": "c_cli01",
+                "status": "final",
+                "split": "final",
+                "ball_colour": "red",
+                "release": {"frame": 5, "x": bx, "y": by},
+                "bounce": {"frame": 15, "x": bx, "y": by, "kind": "pitch"},
+                "impact": {"frame": 20, "x": bx, "y": by, "type": "none"},
+                "last_visible_frame": 25,
+                "flags": [],
+                "calibration_gt": calib_gt,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (clip_run_dir / "detections_20261113_000000.csv").write_text(
+        f"--- BALL DETECTIONS ---\nframe,height,y2,cy\n15,16,{by + 8.0},{by}\n",
+        encoding="utf-8",
+    )
+    (clip_run_dir / "results.json").write_text(
+        json.dumps(
+            {
+                "video": {"frame_count": 30},
+                "outputs": {"csv_url": "detections_20261113_000000.csv"},
+                "events": {
+                    "release": {"frame": 5, "x": bx, "y": by},
+                    "bounce": {"frame": 15, "x": bx, "y": by + 8.0, "zone": "GOOD", "length_m": 6.0},
+                    "deviation": None,
+                    "impact": None,
+                },
+                "trajectory": [{"frame": 15, "x": bx, "y": by, "interpolated": False}],
+                "stats": {"processing_time_sec": 2.5},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (runs_dir / "orig_run" / "run_info.json").write_text(
+        json.dumps({"run_name": "orig_run", "clips": [{"clip_id": "c_cli01"}]}),
+        encoding="utf-8",
+    )
+
+    rc = score_main(
+        [
+            "--run",
+            "orig_run",
+            "--out-name",
+            "orig_run_v2",
+            "--labels-dir",
+            str(labels_dir),
+            "--library-dir",
+            str(library_dir),
+            "--runs-dir",
+            str(runs_dir),
+            "--reports-dir",
+            str(reports_dir),
+        ]
+    )
+    assert rc == 0
+    assert (reports_dir / "orig_run_v2.md").is_file()
+    assert (reports_dir / "orig_run_v2_per_clip.csv").is_file()
+    assert (reports_dir / "orig_run_v2_summary.json").is_file()
+    assert not (reports_dir / "orig_run.md").exists()
+
+    summary = json.loads((reports_dir / "orig_run_v2_summary.json").read_text(encoding="utf-8"))
+    assert summary["overall"]["bounce_marker_offset"]["dy_median"] == pytest.approx(8.0, abs=1e-6)
+    assert summary["overall"]["bounce_marker_offset"]["dy_over_box_height_median"] == pytest.approx(0.5, abs=1e-6)
+    assert summary["overall"]["bounce_centre_vs_centre"]["dx_median"] == pytest.approx(0.0, abs=1e-6)
+    assert summary["overall"]["bounce_centre_vs_centre"]["dy_median"] == pytest.approx(0.0, abs=1e-6)

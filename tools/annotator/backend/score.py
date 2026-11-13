@@ -20,6 +20,7 @@ from scoring import (  # noqa: E402
     aggregate_scores,
     format_markdown_report,
     format_per_clip_csv,
+    load_ball_detections_csv,
     load_legacy_zones,
     score_clip,
 )
@@ -66,9 +67,26 @@ def load_final_calibrated_labels(labels_dir: Path) -> List[Dict[str, Any]]:
     return labels
 
 
+def _find_detections_csv(
+    clip_run_dir: Path,
+    results_data: Optional[Dict[str, Any]],
+) -> Optional[Path]:
+    if not clip_run_dir.is_dir():
+        return None
+    if isinstance(results_data, dict):
+        csv_rel = (results_data.get("outputs") or {}).get("csv_url")
+        if isinstance(csv_rel, str) and csv_rel.strip():
+            cand = clip_run_dir / Path(csv_rel.strip()).name
+            if cand.is_file():
+                return cand
+    matches = sorted(clip_run_dir.glob("detections*.csv"))
+    return matches[0] if matches else None
+
+
 def run_scoring(
     *,
     run_name: str,
+    out_name: Optional[str] = None,
     tolerances: Sequence[int] = DEFAULT_TOLERANCES,
     labels_dir: Optional[Path] = None,
     library_dir: Optional[Path] = None,
@@ -111,10 +129,14 @@ def run_scoring(
     clip_scores: List[Dict[str, Any]] = []
     for label in selected_labels:
         clip_id = str(label["clip_id"])
-        results_path = run_dir / clip_id / "results.json"
+        clip_run_dir = run_dir / clip_id
+        results_path = clip_run_dir / "results.json"
         results_data: Optional[Dict[str, Any]] = None
         if results_path.is_file():
             results_data = json.loads(results_path.read_text(encoding="utf-8"))
+
+        det_csv_path = _find_detections_csv(clip_run_dir, results_data)
+        detections_by_frame = load_ball_detections_csv(det_csv_path) if det_csv_path else None
 
         lib_entry = catalog.get(clip_id) or {}
         expected_fc = lib_entry.get("frame_count")
@@ -127,6 +149,7 @@ def run_scoring(
             results_data,
             expected_frame_count=expected_fc_int,
             zones=zones,
+            detections_by_frame=detections_by_frame,
         )
         clip_scores.append(scored)
 
@@ -137,12 +160,13 @@ def run_scoring(
         run_info=run_info,
     )
 
+    effective_out_name = (out_name or "").strip() or run_name
     resolved_reports_dir.mkdir(parents=True, exist_ok=True)
-    md_path = resolved_reports_dir / f"{run_name}.md"
-    csv_path = resolved_reports_dir / f"{run_name}_per_clip.csv"
-    json_path = resolved_reports_dir / f"{run_name}_summary.json"
+    md_path = resolved_reports_dir / f"{effective_out_name}.md"
+    csv_path = resolved_reports_dir / f"{effective_out_name}_per_clip.csv"
+    json_path = resolved_reports_dir / f"{effective_out_name}_summary.json"
 
-    md_path.write_text(format_markdown_report(summary, run_name), encoding="utf-8")
+    md_path.write_text(format_markdown_report(summary, effective_out_name), encoding="utf-8")
     csv_path.write_text(format_per_clip_csv(clip_scores), encoding="utf-8")
     json_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 
@@ -161,6 +185,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         required=True,
         type=str,
         help="Run name under eval/runs/<run_name>.",
+    )
+    parser.add_argument(
+        "--out-name",
+        type=str,
+        default=None,
+        help="Optional output report base name (defaults to --run).",
     )
     parser.add_argument(
         "--tolerances",
@@ -200,6 +230,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     tols = [int(x.strip()) for x in args.tolerances.split(",") if x.strip()]
     run_scoring(
         run_name=args.run,
+        out_name=args.out_name,
         tolerances=tols,
         labels_dir=args.labels_dir,
         library_dir=args.library_dir,
