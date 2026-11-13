@@ -1,7 +1,13 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schema import Label, Point, ImpactPoint, validate_label
+from app.schema import (
+    Label,
+    Point,
+    ImpactPoint,
+    get_consistency_warnings,
+    validate_label,
+)
 
 
 def base_valid_dict() -> dict:
@@ -138,7 +144,15 @@ def test_schema_lbw_only_allowed_with_pad():
     assert label.lbw == "out"
 
     # All valid lbw decisions
-    for dec in ["out", "not_out_pitched_leg", "not_out_impact_outside", "not_out_missing", "umpires_call"]:
+    for dec in [
+        "out",
+        "not_out_pitched_leg",
+        "not_out_impact_outside",
+        "not_out_missing",
+        "umpires_call",
+        "not_out_unspecified",
+        "not_available",
+    ]:
         data["lbw"] = dec
         assert validate_label(data).lbw == dec
 
@@ -207,11 +221,12 @@ def test_schema_final_status_mandatory_fields():
     with pytest.raises((ValidationError, ValueError), match="calibration_gt is required"):
         validate_label(data)
 
-    # Missing split
+    # split=None is ALLOWED for status 'final'
     data = base_valid_dict()
     data["split"] = None
-    with pytest.raises((ValidationError, ValueError), match="split is required"):
-        validate_label(data)
+    valid_no_split = validate_label(data)
+    assert valid_no_split.status == "final"
+    assert valid_no_split.split is None
 
     # Missing bowler_type
     data = base_valid_dict()
@@ -346,3 +361,53 @@ def test_schema_stump_confirmed_partial_and_both():
     assert label.calibration_gt.stump_confirmed.bat_stump is True
     assert label.calibration_gt.stump_confirmed.bowl_stump is False
     assert label.calibration_gt.residual_px == 2.5
+
+
+def test_schema_reference_decision_and_source_group():
+    data = base_valid_dict()
+    data["reference_decision"] = "out"
+    data["source_group"] = "ind_vs_aus_2025"
+    label = validate_label(data)
+    assert label.reference_decision == "out"
+    assert label.source_group == "ind_vs_aus_2025"
+
+    data["reference_decision"] = "invalid_val"
+    with pytest.raises(ValidationError):
+        validate_label(data)
+
+
+def test_consistency_warnings():
+    # 1. reference_decision "out" + impact.type "pad" + lbw not in ("out", "not_available")
+    data = base_valid_dict()
+    data["reference_decision"] = "out"
+    data["impact"] = {"type": "pad", "frame": 18, "x": 180.0, "y": 220.0}
+    data["lbw"] = "not_out_missing"
+    label = validate_label(data)
+    warnings = get_consistency_warnings(label)
+    assert len(warnings) == 1
+    assert warnings[0]["severity"] == "warning"
+    assert warnings[0]["message"] == "File name says out but lbw is not out"
+
+    # Allowed when lbw is "out" or "not_available"
+    for ok_lbw in ("out", "not_available"):
+        data["lbw"] = ok_lbw
+        assert get_consistency_warnings(validate_label(data)) == []
+
+    # 2. reference_decision "not_out" + lbw "out"
+    data = base_valid_dict()
+    data["reference_decision"] = "not_out"
+    data["impact"] = {"type": "pad", "frame": 18, "x": 180.0, "y": 220.0}
+    data["lbw"] = "out"
+    warnings = get_consistency_warnings(validate_label(data))
+    assert len(warnings) == 1
+    assert warnings[0]["message"] == "File name says not out but lbw is out"
+
+    # 3. reference_decision "out" + impact.type "none"
+    data = base_valid_dict()
+    data["reference_decision"] = "out"
+    data["impact"] = {"type": "none", "frame": None, "x": None, "y": None}
+    data["lbw"] = None
+    warnings = get_consistency_warnings(validate_label(data))
+    assert len(warnings) == 1
+    assert warnings[0]["message"] == "Out delivery with no contact: check the label"
+

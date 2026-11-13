@@ -1,12 +1,14 @@
 import { create } from 'zustand';
 import {
   ClipItem,
+  LibraryClipPatch,
   PrefillData,
   fetchClips,
   fetchPrefill,
   fetchLibraryInfo,
   markClipOpened,
   hideClip,
+  patchLibraryClip,
   uploadVideoFile,
 } from './api';
 import { Viewport } from './lib/viewport';
@@ -96,6 +98,7 @@ export interface AnnotatorState {
   setActiveTab: (tab: 'recents' | 'library' | 'debug') => void;
   setShowAllRecents: (showAll: boolean) => void;
   hideClipAction: (clipId: string) => Promise<void>;
+  patchLibraryClipAction: (clipId: string, patch: LibraryClipPatch) => Promise<ClipItem | null>;
   triggerOpenFilePicker: () => void;
   setIsDraggingFiles: (isDragging: boolean) => void;
   uploadFiles: (files: File[]) => Promise<void>;
@@ -257,6 +260,28 @@ export const useAnnotatorStore = create<AnnotatorState>((set, get) => ({
       }
     } catch (err) {
       console.error(`Failed to hide clip ${clipId}:`, err);
+    }
+  },
+
+  patchLibraryClipAction: async (clipId: string, patch: LibraryClipPatch) => {
+    try {
+      const updated = await patchLibraryClip(clipId, patch);
+      set((state) => ({
+        clips: state.clips.map((c) =>
+          c.clip_id === clipId
+            ? {
+                ...c,
+                reference_decision: updated.reference_decision ?? null,
+                ball_colour_hint: updated.ball_colour_hint ?? null,
+                source_group: updated.source_group ?? null,
+              }
+            : c
+        ),
+      }));
+      return updated;
+    } catch (err) {
+      console.error(`Failed to patch clip ${clipId}:`, err);
+      return null;
     }
   },
 

@@ -23,7 +23,10 @@ LBWDecision = Literal[
     "not_out_impact_outside",
     "not_out_missing",
     "umpires_call",
+    "not_out_unspecified",
+    "not_available",
 ]
+ReferenceDecision = Literal["out", "not_out"]
 LabelFlag = Literal["ball_not_visible", "camera_moved", "bad_calibration", "unclear"]
 LabelStatus = Literal["draft", "final", "flagged"]
 LabelMode = Literal["assisted", "blind"]
@@ -100,6 +103,8 @@ class Label(BaseModel):
     impact: Optional[ImpactPoint] = None
     last_visible_frame: Optional[int] = None
     lbw: Optional[LBWDecision] = None
+    reference_decision: Optional[ReferenceDecision] = None
+    source_group: Optional[str] = None
     calibration_gt: Optional[CalibrationGT] = None
     flags: List[LabelFlag] = Field(default_factory=list)
     notes: str = ""
@@ -221,8 +226,6 @@ class Label(BaseModel):
                 raise ValueError("batter_hand is required for status 'final'")
             if self.calibration_gt is None:
                 raise ValueError("calibration_gt is required for status 'final'")
-            if self.split is None:
-                raise ValueError("split is required for status 'final'")
             if self.bowler_type is None:
                 raise ValueError("bowler_type is required for status 'final'")
             if self.lighting is None:
@@ -301,3 +304,52 @@ def validate_label(
         return Label.model_validate(data, context=context)
 
     raise TypeError(f"Expected dict or Label, got {type(data)}")
+
+
+def get_consistency_warnings(label: Label | Dict[str, Any]) -> List[Dict[str, str]]:
+    """
+    Compute non-blocking consistency warnings comparing reference_decision with
+    impact.type and lbw. Identical to frontend validate.ts consistency warnings.
+    """
+    if isinstance(label, Label):
+        ref_dec = label.reference_decision
+        impact_type = label.impact.type if label.impact is not None else None
+        lbw = label.lbw
+    elif isinstance(label, dict):
+        ref_dec = label.get("reference_decision")
+        imp = label.get("impact")
+        impact_type = imp.get("type") if isinstance(imp, dict) else None
+        lbw = label.get("lbw")
+    else:
+        return []
+
+    warnings: List[Dict[str, str]] = []
+
+    if ref_dec == "out" and impact_type == "pad" and lbw not in ("out", "not_available"):
+        warnings.append(
+            {
+                "path": "lbw",
+                "message": "File name says out but lbw is not out",
+                "severity": "warning",
+            }
+        )
+
+    if ref_dec == "not_out" and lbw == "out":
+        warnings.append(
+            {
+                "path": "lbw",
+                "message": "File name says not out but lbw is out",
+                "severity": "warning",
+            }
+        )
+
+    if ref_dec == "out" and impact_type == "none":
+        warnings.append(
+            {
+                "path": "impact",
+                "message": "Out delivery with no contact: check the label",
+                "severity": "warning",
+            }
+        )
+
+    return warnings

@@ -286,3 +286,103 @@ def test_library_clip_prefill_and_frame_endpoints(temp_dirs):
     assert prefill_data["events"] == {"release": None, "bounce": None, "impact": None, "deviation": None}
     assert prefill_data["trajectory"] == []
     assert prefill_data["calibration"] is None
+
+
+def test_library_upload_parses_filename_meta_and_patch(temp_dirs):
+    client = TestClient(app)
+    video_bytes = create_synthetic_video_bytes(num_frames=25, color_offset=77)
+
+    resp = client.post(
+        "/api/library/upload?name=bowled_out_red.mp4",
+        content=video_bytes,
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    assert resp.status_code == 200
+    entry = resp.json()["entry"]
+    clip_id = entry["clip_id"]
+    assert entry["reference_decision"] == "out"
+    assert entry["ball_colour_hint"] == "red"
+    assert entry["source_group"] is None
+
+    # PATCH valid fields
+    patch_resp = client.patch(
+        f"/api/library/{clip_id}",
+        json={
+            "reference_decision": "not_out",
+            "ball_colour_hint": "white",
+            "source_group": "ind_vs_aus",
+        },
+    )
+    assert patch_resp.status_code == 200
+    patched = patch_resp.json()["entry"]
+    assert patched["reference_decision"] == "not_out"
+    assert patched["ball_colour_hint"] == "white"
+    assert patched["source_group"] == "ind_vs_aus"
+
+    # Persistence check
+    catalog = load_library_catalog(temp_dirs["library_dir"])
+    assert catalog[clip_id]["reference_decision"] == "not_out"
+    assert catalog[clip_id]["ball_colour_hint"] == "white"
+    assert catalog[clip_id]["source_group"] == "ind_vs_aus"
+
+    # PATCH partial clear (set reference_decision to null, leave others unchanged)
+    patch_clear = client.patch(
+        f"/api/library/{clip_id}",
+        json={"reference_decision": None},
+    )
+    assert patch_clear.status_code == 200
+    assert patch_clear.json()["entry"]["reference_decision"] is None
+    assert patch_clear.json()["entry"]["ball_colour_hint"] == "white"
+
+    # Invalid value -> 422
+    bad_patch = client.patch(
+        f"/api/library/{clip_id}",
+        json={"reference_decision": "maybe"},
+    )
+    assert bad_patch.status_code == 422
+
+    # Unknown field -> 422
+    extra_patch = client.patch(
+        f"/api/library/{clip_id}",
+        json={"unknown_field": 123},
+    )
+    assert extra_patch.status_code == 422
+
+    # Missing clip -> 404
+    missing_patch = client.patch(
+        "/api/library/c_doesnotexist",
+        json={"reference_decision": "out"},
+    )
+    assert missing_patch.status_code == 404
+
+
+def test_put_label_enforces_reference_decision_from_library(temp_dirs):
+    client = TestClient(app)
+    video_bytes = create_synthetic_video_bytes(num_frames=30, color_offset=99)
+
+    resp = client.post(
+        "/api/library/upload?name=ind_vs_aus_lbw_out.mp4",
+        content=video_bytes,
+    )
+    clip_id = resp.json()["entry"]["clip_id"]
+
+    # Client attempts to send wrong reference_decision ("not_out"); backend must overwrite from library entry ("out")
+    payload = {
+        "schema_version": 1,
+        "clip_id": clip_id,
+        "annotator": "tester",
+        "mode": "blind",
+        "status": "draft",
+        "created_at": "2026-11-13T10:00:00Z",
+        "updated_at": "2026-11-13T10:00:00Z",
+        "reference_decision": "not_out",
+        "impact": {"type": "pad", "frame": 15, "x": 100.0, "y": 100.0},
+        "lbw": "not_out_missing",
+    }
+    put_resp = client.put(f"/api/clips/{clip_id}/label", json=payload)
+    assert put_resp.status_code == 200
+    body = put_resp.json()
+    assert body["label"]["reference_decision"] == "out"
+    assert len(body["warnings"]) == 1
+    assert body["warnings"][0]["message"] == "File name says out but lbw is not out"
+

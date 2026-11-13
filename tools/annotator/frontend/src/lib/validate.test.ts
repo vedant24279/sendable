@@ -229,7 +229,7 @@ describe('validateLabel', () => {
       expect(paths).toContain('ball_colour');
       expect(paths).toContain('batter_hand');
       expect(paths).toContain('calibration_gt');
-      expect(paths).toContain('split');
+      expect(paths).not.toContain('split');
       expect(paths).toContain('bowler_type');
       expect(paths).toContain('lighting');
     });
@@ -329,6 +329,48 @@ describe('validateLabel', () => {
       const err = issues.find((i) => i.path === 'calibration_gt' && i.severity === 'error');
       expect(err).toBeDefined();
       expect(err?.message).toContain('strictly less than');
+    });
+
+    it('allows split to be null for final status and accepts new lbw values', () => {
+      const label = createValidFinalLabel();
+      label.split = null;
+      label.impact = { type: 'pad', frame: 22, x: 900, y: 420 };
+      label.lbw = 'not_out_unspecified';
+      let issues = validateLabel(label, baseMeta, 'final');
+      expect(issues.filter((i) => i.severity === 'error')).toHaveLength(0);
+
+      label.lbw = 'not_available';
+      issues = validateLabel(label, baseMeta, 'final');
+      expect(issues.filter((i) => i.severity === 'error')).toHaveLength(0);
+    });
+
+    it('emits consistency warnings matching backend rules', () => {
+      const label1 = createValidFinalLabel();
+      label1.reference_decision = 'out';
+      label1.impact = { type: 'pad', frame: 22, x: 920, y: 620 };
+      label1.lbw = 'not_out_missing';
+      let issues = validateLabel(label1, baseMeta, 'final');
+      expect(issues.some((i) => i.severity === 'warning' && i.message === 'File name says out but lbw is not out')).toBe(true);
+
+      // Not emitted when lbw is out or not_available
+      label1.lbw = 'out';
+      expect(validateLabel(label1, baseMeta, 'final').some((i) => i.message === 'File name says out but lbw is not out')).toBe(false);
+      label1.lbw = 'not_available';
+      expect(validateLabel(label1, baseMeta, 'final').some((i) => i.message === 'File name says out but lbw is not out')).toBe(false);
+
+      const label2 = createValidFinalLabel();
+      label2.reference_decision = 'not_out';
+      label2.impact = { type: 'pad', frame: 22, x: 920, y: 620 };
+      label2.lbw = 'out';
+      issues = validateLabel(label2, baseMeta, 'final');
+      expect(issues.some((i) => i.severity === 'warning' && i.message === 'File name says not out but lbw is out')).toBe(true);
+
+      const label3 = createValidFinalLabel();
+      label3.reference_decision = 'out';
+      label3.impact = { type: 'none', frame: 22, x: null, y: null };
+      label3.lbw = null;
+      issues = validateLabel(label3, baseMeta, 'final');
+      expect(issues.some((i) => i.severity === 'warning' && i.message === 'Out delivery with no contact: check the label')).toBe(true);
     });
   });
 });

@@ -6,6 +6,8 @@ import { ClipList } from './components/ClipList';
 import { Viewer } from './components/Viewer';
 import { Timeline } from './components/Timeline';
 import { LabelPanel } from './components/LabelPanel';
+import { formatFileSize } from './lib/libraryUtils';
+import type { ReferenceDecision } from './lib/labelModel';
 
 export default function App() {
   const loadClips = useAnnotatorStore((s) => s.loadClips);
@@ -27,6 +29,7 @@ export default function App() {
   const toggleCalibrationMode = useAnnotatorStore((s) => s.toggleCalibrationMode);
   const loupeMag = useAnnotatorStore((s) => s.loupeMag);
   const uploadFiles = useAnnotatorStore((s) => s.uploadFiles);
+  const patchLibraryClipAction = useAnnotatorStore((s) => s.patchLibraryClipAction);
   const [viewerDragOver, setViewerDragOver] = useState(false);
 
   // Activate keyboard shortcuts
@@ -180,9 +183,78 @@ export default function App() {
           <h3 className="section-title">Delivery Info</h3>
           {clip ? (
             <dl className="meta-list">
+              <div className="meta-row meta-row-wrap">
+                <dt>File Name</dt>
+                <dd className="meta-display-name">{clip.display_name || clip.clip_id}</dd>
+              </div>
               <div className="meta-row">
                 <dt>Clip ID</dt>
                 <dd className="mono-text">{clip.clip_id}</dd>
+              </div>
+              <div className="meta-row">
+                <dt>Ref Decision</dt>
+                <dd className="ref-decision-cell">
+                  <span
+                    className={`decision-badge ${
+                      clip.reference_decision === 'out'
+                        ? 'decision-out'
+                        : clip.reference_decision === 'not_out'
+                          ? 'decision-not-out'
+                          : 'decision-unknown'
+                    }`}
+                  >
+                    {clip.reference_decision === 'out'
+                      ? 'OUT'
+                      : clip.reference_decision === 'not_out'
+                        ? 'NOT OUT'
+                        : '?'}
+                  </span>
+                  {clip.pool !== 'debug' && (
+                    <select
+                      className="decision-select-inline"
+                      value={clip.reference_decision ?? ''}
+                      aria-label="Set reference decision"
+                      onChange={async (e) => {
+                        const raw = e.target.value;
+                        const nextVal: ReferenceDecision | null =
+                          raw === 'out' || raw === 'not_out' ? raw : null;
+                        const updated = await patchLibraryClipAction(clip.clip_id, {
+                          reference_decision: nextVal,
+                        });
+                        useLabelStore
+                          .getState()
+                          .syncReferenceDecision(
+                            clip.clip_id,
+                            updated ? (updated.reference_decision ?? null) : nextVal
+                          );
+                      }}
+                    >
+                      <option value="">Unknown (?)</option>
+                      <option value="out">OUT</option>
+                      <option value="not_out">NOT OUT</option>
+                    </select>
+                  )}
+                </dd>
+              </div>
+              <div className="meta-row">
+                <dt>File Size</dt>
+                <dd>{formatFileSize(clip.size_bytes)}</dd>
+              </div>
+              <div className="meta-row meta-row-wrap">
+                <dt>Warnings</dt>
+                <dd className="clip-warnings-dd">
+                  {clip.warnings && clip.warnings.length > 0 ? (
+                    <span className="clip-warnings-list">
+                      {clip.warnings.map((w) => (
+                        <span key={w} className="clip-warning-pill">
+                          ⚠ {w}
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    'None'
+                  )}
+                </dd>
               </div>
               <div className="meta-row">
                 <dt>Resolution</dt>
@@ -198,8 +270,8 @@ export default function App() {
               </div>
               <div className="meta-row">
                 <dt>Ball Colour</dt>
-                <dd className={`badge-ball ball-${clip.ball_type || 'unknown'}`}>
-                  {clip.ball_type || 'N/A'}
+                <dd className={`badge-ball ball-${clip.ball_type || clip.ball_colour_hint || 'unknown'}`}>
+                  {clip.ball_type || clip.ball_colour_hint || 'N/A'}
                 </dd>
               </div>
               <div className="meta-row">

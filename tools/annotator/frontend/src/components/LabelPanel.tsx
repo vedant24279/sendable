@@ -207,8 +207,16 @@ export const LabelPanel: FC = () => {
 
       {/* 3. Validation Issues List */}
       {issues.length > 0 && (
-        <div className="validation-issues-box">
-          <h4 className="issues-title">Validation Issues ({issues.length})</h4>
+        <div
+          className={`validation-issues-box ${
+            issues.some((i) => i.severity === 'error') ? '' : 'warnings-only'
+          }`}
+        >
+          <h4 className="issues-title">
+            {issues.some((i) => i.severity === 'error')
+              ? `Validation Issues (${issues.length})`
+              : `Warnings (${issues.length})`}
+          </h4>
           <ul className="issues-list">
             {issues.map((issue, idx) => {
               // Extract frame if issue relates to a frame
@@ -449,7 +457,9 @@ export const LabelPanel: FC = () => {
           <option value="not_out_pitched_leg">Not Out (Pitched Outside Leg)</option>
           <option value="not_out_impact_outside">Not Out (Impact Outside Off)</option>
           <option value="not_out_missing">Not Out (Missing Wickets)</option>
+          <option value="not_out_unspecified">Not Out (Unspecified)</option>
           <option value="umpires_call">Umpire's Call</option>
+          <option value="not_available">Not Available</option>
         </select>
       </div>
 
@@ -534,6 +544,20 @@ export const LabelPanel: FC = () => {
             <option value="dev">Dev</option>
             <option value="final">Final</option>
           </select>
+        </div>
+
+        <div className="form-group">
+          <label className="field-label">Source Group</label>
+          <input
+            type="text"
+            className="text-input"
+            placeholder="e.g. match_01"
+            value={label.source_group ?? ''}
+            onChange={(e) => {
+              const val = e.target.value;
+              apply((l) => setMeta(l, 'source_group', val === '' ? null : val, { ghostVisible }));
+            }}
+          />
         </div>
       </div>
 

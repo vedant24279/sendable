@@ -21,7 +21,10 @@ export type LBWDecision =
   | 'not_out_pitched_leg'
   | 'not_out_impact_outside'
   | 'not_out_missing'
-  | 'umpires_call';
+  | 'umpires_call'
+  | 'not_out_unspecified'
+  | 'not_available';
+export type ReferenceDecision = 'out' | 'not_out';
 export type LabelFlag = 'ball_not_visible' | 'camera_moved' | 'bad_calibration' | 'unclear';
 export type LabelStatus = 'draft' | 'final' | 'flagged';
 export type LabelMode = 'assisted' | 'blind';
@@ -72,6 +75,8 @@ export interface Label {
   impact: ImpactPoint | null;
   last_visible_frame: number | null;
   lbw: LBWDecision | null;
+  reference_decision?: ReferenceDecision | null;
+  source_group?: string | null;
   calibration_gt: CalibrationGT | null;
   flags: LabelFlag[];
   notes: string;
@@ -85,6 +90,9 @@ export interface ClipMetaInput {
   height?: number;
   fps?: number;
   ball_type?: string | null;
+  ball_colour_hint?: string | null;
+  reference_decision?: ReferenceDecision | null;
+  source_group?: string | null;
 }
 
 export interface EditContext {
@@ -117,7 +125,10 @@ export function emptyLabel(
   prefill: (PrefillData & { ball_type?: string | null }) | null,
   annotator: string
 ): Label {
-  const prefillBallType = (prefill as { ball_type?: string | null } | null)?.ball_type ?? meta.ball_type;
+  const prefillBallType =
+    (prefill as { ball_type?: string | null } | null)?.ball_type ??
+    meta.ball_type ??
+    meta.ball_colour_hint;
   let ballColour: BallColour | null = null;
   if (
     prefillBallType === 'white' ||
@@ -147,6 +158,8 @@ export function emptyLabel(
     impact: null,
     last_visible_frame: null,
     lbw: null,
+    reference_decision: meta.reference_decision ?? null,
+    source_group: meta.source_group ?? null,
     calibration_gt: null,
     flags: [],
     notes: '',

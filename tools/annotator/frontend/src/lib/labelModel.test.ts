@@ -289,4 +289,25 @@ describe('labelModel', () => {
     const confirmed = getStumpConfirmed(oldCalib as any);
     expect(confirmed).toEqual({ bat_stump: false, bowl_stump: false });
   });
+
+  it('prefills reference_decision, ball_colour_hint fallback, and source_group in emptyLabel', () => {
+    const label = emptyLabel(
+      {
+        clip_id: 'c_abc',
+        reference_decision: 'out',
+        ball_colour_hint: 'red',
+        source_group: 'ind_vs_aus',
+      },
+      null,
+      'tester',
+    );
+    expect(label.reference_decision).toBe('out');
+    expect(label.ball_colour).toBe('red');
+    expect(label.source_group).toBe('ind_vs_aus');
+
+    label.lbw = 'not_out_unspecified';
+    expect(label.lbw).toBe('not_out_unspecified');
+    label.lbw = 'not_available';
+    expect(label.lbw).toBe('not_available');
+  });
 });

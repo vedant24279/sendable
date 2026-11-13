@@ -20,12 +20,20 @@ if str(_backend_dir) not in sys.path:
 import cv2
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
-from app.schema import Label, validate_label
+from app.schema import (
+    BallColour,
+    Label,
+    ReferenceDecision,
+    get_consistency_warnings,
+    validate_label,
+)
 from app.calib import fit_homography
 from app.library import (
     get_library_dir,
+    load_library_catalog,
+    patch_library_entry,
     process_video_upload,
     get_library_recents,
     get_all_library_entries,
@@ -109,6 +117,34 @@ def startup_event() -> None:
     load_manifest()
 
 
+def _build_library_clip_meta(
+    entry: Dict[str, Any], status: str, split: Optional[str], has_gt: bool
+) -> Dict[str, Any]:
+    return {
+        "clip_id": entry["clip_id"],
+        "display_name": entry.get("display_name", entry["clip_id"]),
+        "pool": "library",
+        "fps": entry["fps"],
+        "frame_count": entry["frame_count"],
+        "width": entry["width"],
+        "height": entry["height"],
+        "warnings": entry.get("warnings", []),
+        "added_at": entry.get("added_at"),
+        "last_opened_at": entry.get("last_opened_at"),
+        "size_bytes": entry.get("size_bytes"),
+        "reference_decision": entry.get("reference_decision"),
+        "ball_colour_hint": entry.get("ball_colour_hint"),
+        "source_group": entry.get("source_group"),
+        "ball_type": None,
+        "has_results": False,
+        "has_calibration": False,
+        "system_residual_px": None,
+        "has_gt_calibration": has_gt,
+        "label_status": status,
+        "split": split,
+    }
+
+
 def resolve_clip(clip_id: str) -> Optional[Tuple[Path, Dict[str, Any]]]:
     """
     Resolve video file path and clip metadata for a clip_id from either the
@@ -128,27 +164,8 @@ def resolve_clip(clip_id: str) -> Optional[Tuple[Path, Dict[str, Any]]]:
             except Exception:
                 pass
 
-        meta: Dict[str, Any] = {
-            "clip_id": entry["clip_id"],
-            "display_name": entry.get("display_name", clip_id),
-            "pool": "library",
-            "fps": entry["fps"],
-            "frame_count": entry["frame_count"],
-            "width": entry["width"],
-            "height": entry["height"],
-            "warnings": entry.get("warnings", []),
-            "added_at": entry.get("added_at"),
-            "last_opened_at": entry.get("last_opened_at"),
-            "size_bytes": entry.get("size_bytes"),
-            "ball_type": None,
-            "has_results": False,
-            "has_calibration": False,
-            "system_residual_px": None,
-            "has_gt_calibration": has_gt,
-            "label_status": status,
-            "split": split,
-            "path": str(video_path),
-        }
+        meta = _build_library_clip_meta(entry, status, split, has_gt)
+        meta["path"] = str(video_path)
         return video_path, meta
 
     # 2. Check manifest for job / debug clips
@@ -255,28 +272,7 @@ def list_clips() -> List[Dict[str, Any]]:
             except Exception:
                 pass
 
-        result.append(
-            {
-                "clip_id": clip_id,
-                "display_name": entry.get("display_name", clip_id),
-                "pool": "library",
-                "fps": entry["fps"],
-                "frame_count": entry["frame_count"],
-                "width": entry["width"],
-                "height": entry["height"],
-                "warnings": entry.get("warnings", []),
-                "added_at": entry.get("added_at"),
-                "last_opened_at": entry.get("last_opened_at"),
-                "size_bytes": entry.get("size_bytes"),
-                "ball_type": None,
-                "has_results": False,
-                "has_calibration": False,
-                "system_residual_px": None,
-                "has_gt_calibration": has_gt,
-                "label_status": status,
-                "split": split,
-            }
-        )
+        result.append(_build_library_clip_meta(entry, status, split, has_gt))
 
     # 2. Debug clips from manifest (pool "debug")
     manifest = load_manifest()
@@ -326,6 +322,9 @@ def list_library_recents(limit: int = 20) -> List[Dict[str, Any]]:
             except Exception:
                 pass
         e_copy["has_gt_calibration"] = has_gt
+        e_copy.setdefault("reference_decision", None)
+        e_copy.setdefault("ball_colour_hint", None)
+        e_copy.setdefault("source_group", None)
         result.append(e_copy)
 
     return result
@@ -353,6 +352,9 @@ def list_library_all() -> List[Dict[str, Any]]:
             except Exception:
                 pass
         e_copy["has_gt_calibration"] = has_gt
+        e_copy.setdefault("reference_decision", None)
+        e_copy.setdefault("ball_colour_hint", None)
+        e_copy.setdefault("source_group", None)
         result.append(e_copy)
 
     return result
@@ -366,6 +368,29 @@ def get_library_info() -> Dict[str, Any]:
         "folder": str(folder),
         "count": len(entries),
     }
+
+
+class LibraryPatchPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reference_decision: Optional[ReferenceDecision] = None
+    ball_colour_hint: Optional[BallColour] = None
+    source_group: Optional[str] = None
+
+
+@app.patch("/api/library/{clip_id}")
+def patch_library_clip(clip_id: str, payload: LibraryPatchPayload) -> Dict[str, Any]:
+    updates: Dict[str, Any] = {}
+    for field in ("reference_decision", "ball_colour_hint", "source_group"):
+        if field in payload.model_fields_set:
+            val = getattr(payload, field)
+            if field == "source_group" and isinstance(val, str):
+                val = val.strip() or None
+            updates[field] = val
+
+    entry = patch_library_entry(clip_id, updates)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Clip not found in library: {clip_id}")
+    return {"status": "ok", "entry": entry}
 
 
 @app.post("/api/library/{clip_id}/opened")
@@ -567,6 +592,9 @@ async def save_label(clip_id: str, request: Request) -> Dict[str, Any]:
     width = clip["width"]
     height = clip["height"]
 
+    # Fill reference_decision from library entry (client cannot override it)
+    body["reference_decision"] = clip.get("reference_decision")
+
     # Recompute calibration residual_px on every PUT (never trust client value)
     calib_gt = body.get("calibration_gt")
     if calib_gt and isinstance(calib_gt, dict) and "points" in calib_gt:
@@ -621,7 +649,11 @@ async def save_label(clip_id: str, request: Request) -> Dict[str, Any]:
     with open(audit_file, "a", encoding="utf-8") as af:
         af.write(json.dumps(audit_entry) + "\n")
 
-    return {"status": "ok", "label": label_data}
+    return {
+        "status": "ok",
+        "label": label_data,
+        "warnings": get_consistency_warnings(label),
+    }
 
 
 if __name__ == "__main__":

@@ -235,13 +235,6 @@ export function validateLabel(
         severity: 'error',
       });
     }
-    if (!label.split) {
-      issues.push({
-        path: 'split',
-        message: "split is required for status 'final'",
-        severity: 'error',
-      });
-    }
     if (!label.bowler_type) {
       issues.push({
         path: 'bowler_type',
@@ -334,6 +327,40 @@ export function validateLabel(
         severity: 'warning',
       });
     }
+  }
+
+  // Consistency warnings (reference_decision vs impact/lbw)
+  const refDec = label.reference_decision;
+  const impactType = label.impact?.type;
+  const lbw = label.lbw;
+
+  if (
+    refDec === 'out' &&
+    impactType === 'pad' &&
+    lbw !== 'out' &&
+    lbw !== 'not_available'
+  ) {
+    issues.push({
+      path: 'lbw',
+      message: 'File name says out but lbw is not out',
+      severity: 'warning',
+    });
+  }
+
+  if (refDec === 'not_out' && lbw === 'out') {
+    issues.push({
+      path: 'lbw',
+      message: 'File name says not out but lbw is out',
+      severity: 'warning',
+    });
+  }
+
+  if (refDec === 'out' && impactType === 'none') {
+    issues.push({
+      path: 'impact',
+      message: 'Out delivery with no contact: check the label',
+      severity: 'warning',
+    });
   }
 
   return issues;

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getLabel, putLabel, ApiValidationError } from './api';
+import { getLabel, putLabel, patchLibraryClip, ApiValidationError } from './api';
 import { emptyLabel } from './lib/labelModel';
 
 describe('api client label endpoints', () => {
@@ -101,5 +101,38 @@ describe('api client label endpoints', () => {
       expect(apiErr.issues).toEqual(['Custom validation failed']);
       expect(apiErr.message).toBe('Custom validation failed');
     }
+  });
+
+  it('patchLibraryClip sends PATCH and returns updated entry', async () => {
+    const updated = {
+      clip_id: 'c_123',
+      display_name: 'test.mp4',
+      reference_decision: 'not_out',
+      ball_colour_hint: 'white',
+      source_group: 'series_a',
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: 'ok', entry: updated }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await patchLibraryClip('c_123', {
+      reference_decision: 'not_out',
+      ball_colour_hint: 'white',
+      source_group: 'series_a',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/library/c_123',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    expect(res.reference_decision).toBe('not_out');
+    expect(res.source_group).toBe('series_a');
   });
 });

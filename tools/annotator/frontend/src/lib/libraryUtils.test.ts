@@ -4,6 +4,8 @@ import {
   filterAllowedVideoFile,
   sortRecents,
   sliceRecents,
+  filterClipsByMeta,
+  formatFileSize,
 } from './libraryUtils';
 import { ClipItem } from '../api';
 
@@ -137,6 +139,60 @@ describe('libraryUtils', () => {
       const slicedAll = sliceRecents(manyClips, true, 20);
       expect(slicedAll.visible.length).toBe(25);
       expect(slicedAll.hasMore).toBe(false);
+    });
+  });
+
+  describe('filterClipsByMeta and formatFileSize', () => {
+    const baseClip: ClipItem = {
+      clip_id: 'c_0',
+      path: '',
+      fps: 30,
+      frame_count: 50,
+      width: 1280,
+      height: 720,
+      ball_type: null,
+      has_results: false,
+      has_calibration: false,
+      label_status: 'none',
+      split: null,
+    };
+    const items: ClipItem[] = [
+      {
+        ...baseClip,
+        clip_id: 'c_1',
+        display_name: 'ind_vs_aus_out.mp4',
+        label_status: 'draft',
+        reference_decision: 'out',
+      },
+      {
+        ...baseClip,
+        clip_id: 'c_2',
+        display_name: 'over_12_not_out.mp4',
+        label_status: 'final',
+        reference_decision: 'not_out',
+      },
+      {
+        ...baseClip,
+        clip_id: 'c_3',
+        display_name: 'practice_clip.mp4',
+        label_status: 'none',
+        reference_decision: null,
+      },
+    ];
+
+    it('filters by decisionFilter and statusFilter', () => {
+      expect(filterClipsByMeta(items, { decisionFilter: 'out' }).map((c) => c.clip_id)).toEqual(['c_1']);
+      expect(filterClipsByMeta(items, { decisionFilter: 'not_out' }).map((c) => c.clip_id)).toEqual(['c_2']);
+      expect(filterClipsByMeta(items, { decisionFilter: 'unknown' }).map((c) => c.clip_id)).toEqual(['c_3']);
+      expect(filterClipsByMeta(items, { statusFilter: 'final', decisionFilter: 'not_out' }).map((c) => c.clip_id)).toEqual(['c_2']);
+      expect(filterClipsByMeta(items, { statusFilter: 'draft', decisionFilter: 'not_out' })).toEqual([]);
+    });
+
+    it('formats file size cleanly', () => {
+      expect(formatFileSize(null)).toBe('N/A');
+      expect(formatFileSize(500)).toBe('500 B');
+      expect(formatFileSize(2048)).toBe('2.0 KB');
+      expect(formatFileSize(2.5 * 1024 * 1024)).toBe('2.5 MB');
     });
   });
 });
