@@ -14,6 +14,14 @@ from impact_rules import (
     rule_i2_max_turn,
     rule_i3_speed_drop,
     rule_i4_last_seen,
+    rule_i5a_ascending_first,
+    rule_i5b_ascending_max_turn,
+    rule_i6a_ungated_first,
+    rule_i6b_ungated_max_turn,
+)
+from post_impact_coverage import (
+    compute_clip_post_impact_coverage,
+    run_post_impact_coverage,
 )
 from trace_impact import run_trace_impact
 
@@ -120,6 +128,10 @@ def test_rules_return_none_without_streaming_bounce() -> None:
     assert rule_i2_max_turn(dump, pts) is None
     assert rule_i3_speed_drop(dump, pts) is None
     assert rule_i4_last_seen(dump, pts, plus_one=True) is None
+    assert rule_i5a_ascending_first(dump, pts, up_frac=0.01, theta_deg=20.0) is None
+    assert rule_i5b_ascending_max_turn(dump, pts, up_frac=0.01, theta_deg=20.0) is None
+    assert rule_i6a_ungated_first(dump, pts, up_frac=0.01, theta_deg=20.0) is None
+    assert rule_i6b_ungated_max_turn(dump, pts, up_frac=0.01, theta_deg=20.0) is None
 
 
 def test_trace_impact_and_eval_impact_rules_synthetic_run(tmp_path: Path) -> None:
@@ -214,4 +226,130 @@ def test_trace_impact_and_eval_impact_rules_synthetic_run(tmp_path: Path) -> Non
     report_txt = eval_md.read_text(encoding="utf-8")
     assert "## Ranked Rules (In-Sample)" in report_txt
     assert "## Leave-One-Out Cross-Validation (LOO)" in report_txt
+    assert "| ref | SYSTEM(deviation) |" in report_txt
     assert "3/3 (100.0% of 3)" in report_txt
+
+
+def test_i5_and_i6_ascending_vertex_and_spatial_gate() -> None:
+    # W = 540, bat_stump = (950, 480) -> gate x in [788, 1112], y in [291, 507].
+    # Bounce at f14 (cy=610, incoming dy > 0 -> rejected by dy <= -UP*W).
+    # Early rising kink outside gate at f16 (cy=550 > 507 -> picked by I6a, rejected by I5a).
+    # Pad vertex inside gate at f19 (cx=960, cy=450 -> largest turn, picked by I5b).
+    dump = {
+        "streaming_bounce": [13, 1020, 590],
+        "ball": {
+            "12": [_det(1030.0, 560.0)],
+            "13": [_det(1020.0, 585.0)],
+            "14": [_det(1010.0, 610.0)],  # bounce (descending incoming dy=+25 -> not ascending)
+            "15": [_det(1000.0, 580.0)],
+            "16": [_det(990.0, 550.0)],   # outside y-gate (550 > 507)
+            "17": [_det(970.0, 520.0)],   # outside y-gate (520 > 507)
+            "18": [_det(965.0, 510.0)],   # outside y-gate (510 > 507)
+            "19": [_det(960.0, 450.0)],   # inside gate, sharp pad deflection
+            "20": [_det(1005.0, 440.0)],
+            "21": [_det(1050.0, 432.0)],
+        },
+    }
+    pts = _calib(bowl_w=540.0, bat_stump_y=480.0)
+    assert rule_i5a_ascending_first(dump, pts, up_frac=0.01, theta_deg=20.0) == (
+        19,
+        960.0,
+        450.0,
+    )
+    assert rule_i5b_ascending_max_turn(dump, pts, up_frac=0.01, theta_deg=20.0) == (
+        19,
+        960.0,
+        450.0,
+    )
+    assert rule_i6a_ungated_first(dump, pts, up_frac=0.01, theta_deg=20.0) == (
+        18,
+        965.0,
+        510.0,
+    )
+    assert rule_i6b_ungated_max_turn(dump, pts, up_frac=0.01, theta_deg=20.0) == (
+        19,
+        960.0,
+        450.0,
+    )
+    # Add an outfield vertex at f25 outside x-gate with huge 150-deg turn: I6b picks f25, I5b stays at f19.
+    dump_outfield = {
+        "streaming_bounce": [13, 1020, 590],
+        "ball": {
+            **dump["ball"],
+            "22": [_det(1290.0, 490.0)],
+            "23": [_det(1300.0, 460.0)],
+            "24": [_det(1310.0, 430.0)],
+            "25": [_det(1320.0, 400.0)],  # cx=1320 > 1112 (outside spatial gate)
+            "26": [_det(1290.0, 430.0)],
+            "27": [_det(1260.0, 460.0)],
+        },
+    }
+    assert rule_i5b_ascending_max_turn(dump_outfield, pts, up_frac=0.01, theta_deg=20.0) == (
+        19,
+        960.0,
+        450.0,
+    )
+    assert rule_i6b_ungated_max_turn(dump_outfield, pts, up_frac=0.01, theta_deg=20.0) == (
+        25,
+        1320.0,
+        400.0,
+    )
+
+
+def test_post_impact_coverage_counts_gaps_outliers_and_traj(tmp_path: Path) -> None:
+    labels_dir = tmp_path / "labels"
+    runs_dir = tmp_path / "runs"
+    analysis_dir = tmp_path / "analysis"
+    labels_dir.mkdir()
+    c_dir = runs_dir / "cov_run" / "c_cov"
+    c_dir.mkdir(parents=True)
+
+    label = {
+        "clip_id": "c_cov",
+        "status": "final",
+        "ball_colour": "pink",
+        "last_visible_frame": 25,
+        "calibration_gt": {"points": _calib(bowl_w=500.0)},  # 0.2*W = 100 px
+        "impact": {"type": "pad", "frame": 20, "x": 950.0, "y": 460.0},
+    }
+    # Frames [20..25] -> 6 frames total.
+    # Present at 20, 21, 24, 25 (4 frames; gap of 2 frames at 22, 23).
+    # At frame 21, detection is at (1200, 800), >100 px away from both f20 (950, 460) and f24 (960, 450) -> 1 outlier.
+    raw_dump = {
+        "ball": {
+            "20": [_det(950.0, 460.0)],
+            "21": [_det(1200.0, 800.0)],
+            "24": [_det(960.0, 450.0)],
+            "25": [_det(965.0, 445.0)],
+        }
+    }
+    results = {
+        "trajectory": [
+            {"frame": 20, "x": 950, "y": 460, "interpolated": False},
+            {"frame": 21, "x": 955, "y": 455, "interpolated": False},
+        ]
+    }
+    cov = compute_clip_post_impact_coverage(label, raw_dump, results)
+    assert cov is not None
+    assert cov.n_frames == 6
+    assert cov.raw_det_frames == 4
+    assert cov.longest_gap_frames == 2
+    assert cov.outlier_detections == 1
+    assert cov.traj_frames == 2
+    assert cov.traj_last_frame == 21
+
+    (labels_dir / "c_cov.json").write_text(json.dumps(label), encoding="utf-8")
+    (c_dir / "raw_ball_detections.json").write_text(json.dumps(raw_dump), encoding="utf-8")
+    (c_dir / "results.json").write_text(json.dumps(results), encoding="utf-8")
+
+    out_md = run_post_impact_coverage(
+        run_name="cov_run",
+        labels_dir=labels_dir,
+        runs_dir=runs_dir,
+        analysis_dir=analysis_dir,
+    )
+    assert out_md.is_file()
+    txt = out_md.read_text(encoding="utf-8")
+    assert "`c_cov`" in txt
+    assert "4/6" in txt
+    assert "2/6" in txt

@@ -18,10 +18,16 @@ if str(BACKEND_DIR) not in sys.path:
 
 from impact_rules import (
     I1_THETA_VALUES,
+    I5_THETA_VALUES,
+    I5_UP_VALUES,
     rule_i1_direction_change,
     rule_i2_max_turn,
     rule_i3_speed_drop,
     rule_i4_last_seen,
+    rule_i5a_ascending_first,
+    rule_i5b_ascending_max_turn,
+    rule_i6a_ungated_first,
+    rule_i6b_ungated_max_turn,
 )
 from trace_release import (
     _safe_float,
@@ -37,10 +43,14 @@ ImpactRuleFn = Callable[
 ]
 
 _FAMILY_ORDER: Dict[str, int] = {
-    "I1": 0,
-    "I2": 1,
-    "I3": 2,
-    "I4": 3,
+    "I5b": 0,
+    "I5a": 1,
+    "I6b": 2,
+    "I6a": 3,
+    "I1": 4,
+    "I2": 5,
+    "I3": 6,
+    "I4": 7,
 }
 
 
@@ -66,6 +76,7 @@ class ImpactClipInput:
     label_y: float
     calib_points: Dict[str, Any]
     raw_dump: Dict[str, Any]
+    sys_deviation: Optional[Tuple[int, float, float]] = None
 
 
 @dataclass(frozen=True)
@@ -159,7 +170,82 @@ def build_impact_rule_specs() -> List[ImpactRuleSpec]:
             fn=lambda dump, pts: rule_i4_last_seen(dump, pts, plus_one=False),
         )
     )
+    for up_val in I5_UP_VALUES:
+        for theta in I5_THETA_VALUES:
+            p_sort = up_val * 1000.0 + theta
+            specs.append(
+                ImpactRuleSpec(
+                    name=f"I5a(up={up_val:.2f},theta={int(theta)})",
+                    family="I5a",
+                    param_sort=p_sort,
+                    fn=lambda dump, pts, _u=up_val, _th=theta: rule_i5a_ascending_first(
+                        dump, pts, up_frac=_u, theta_deg=_th
+                    ),
+                )
+            )
+    for up_val in I5_UP_VALUES:
+        for theta in I5_THETA_VALUES:
+            p_sort = up_val * 1000.0 + theta
+            specs.append(
+                ImpactRuleSpec(
+                    name=f"I5b(up={up_val:.2f},theta={int(theta)})",
+                    family="I5b",
+                    param_sort=p_sort,
+                    fn=lambda dump, pts, _u=up_val, _th=theta: rule_i5b_ascending_max_turn(
+                        dump, pts, up_frac=_u, theta_deg=_th
+                    ),
+                )
+            )
+    for up_val in I5_UP_VALUES:
+        for theta in I5_THETA_VALUES:
+            p_sort = up_val * 1000.0 + theta
+            specs.append(
+                ImpactRuleSpec(
+                    name=f"I6a(up={up_val:.2f},theta={int(theta)})",
+                    family="I6a",
+                    param_sort=p_sort,
+                    fn=lambda dump, pts, _u=up_val, _th=theta: rule_i6a_ungated_first(
+                        dump, pts, up_frac=_u, theta_deg=_th
+                    ),
+                )
+            )
+    for up_val in I5_UP_VALUES:
+        for theta in I5_THETA_VALUES:
+            p_sort = up_val * 1000.0 + theta
+            specs.append(
+                ImpactRuleSpec(
+                    name=f"I6b(up={up_val:.2f},theta={int(theta)})",
+                    family="I6b",
+                    param_sort=p_sort,
+                    fn=lambda dump, pts, _u=up_val, _th=theta: rule_i6b_ungated_max_turn(
+                        dump, pts, up_frac=_u, theta_deg=_th
+                    ),
+                )
+            )
     return specs
+
+
+def _extract_system_deviation(results_path: Path) -> Optional[Tuple[int, float, float]]:
+    if not results_path.is_file():
+        return None
+    try:
+        data = json.loads(results_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    events = data.get("events")
+    if not isinstance(events, dict):
+        return None
+    dev = events.get("deviation")
+    if not isinstance(dev, dict):
+        return None
+    df = _safe_int(dev.get("frame"))
+    dx = _safe_float(dev.get("x"))
+    dy = _safe_float(dev.get("y"))
+    if df is None or dx is None or dy is None:
+        return None
+    return (df, dx, dy)
 
 
 def load_impact_clip_inputs(run_dir: Path, labels_dir: Path) -> List[ImpactClipInput]:
@@ -200,6 +286,7 @@ def load_impact_clip_inputs(run_dir: Path, labels_dir: Path) -> List[ImpactClipI
             raw_dump = json.load(fh)
         if not isinstance(raw_dump, dict):
             continue
+        sys_dev = _extract_system_deviation(run_dir / clip_id / "results.json")
 
         clips.append(
             ImpactClipInput(
@@ -211,6 +298,7 @@ def load_impact_clip_inputs(run_dir: Path, labels_dir: Path) -> List[ImpactClipI
                 label_y=imp_y,
                 calib_points=calib["points"],
                 raw_dump=raw_dump,
+                sys_deviation=sys_dev,
             )
         )
     return clips
@@ -292,17 +380,73 @@ def evaluate_impact_rule(
     )
 
 
+def evaluate_system_deviation(
+    clips: Sequence[ImpactClipInput],
+) -> ImpactRuleSummary:
+    """Evaluate the pipeline's events.deviation as a reference impact row."""
+    spec = ImpactRuleSpec(
+        name="SYSTEM(deviation)",
+        family="REF",
+        fn=lambda _dump, _pts: None,
+    )
+    preds: List[ImpactClipPrediction] = []
+    f_errs: List[Optional[int]] = []
+    px_errs: List[Optional[float]] = []
+
+    for clip in clips:
+        if clip.sys_deviation is not None:
+            pf, px, py = clip.sys_deviation
+            fe: Optional[int] = pf - clip.label_frame
+            pe: Optional[float] = float(math.hypot(px - clip.label_x, py - clip.label_y))
+        else:
+            pf = None
+            px = None
+            py = None
+            fe = None
+            pe = None
+        preds.append(
+            ImpactClipPrediction(
+                clip_id=clip.clip_id,
+                ball_colour=clip.ball_colour,
+                label_frame=clip.label_frame,
+                pred_frame=pf,
+                pred_x=px,
+                pred_y=py,
+                frame_error=fe,
+                px_error=pe,
+            )
+        )
+        f_errs.append(fe)
+        px_errs.append(pe)
+
+    n_total, n_found, n_exact, n_within_1, n_within_2, mae, px_med, px_p90 = (
+        _aggregate_metrics(f_errs, px_errs)
+    )
+    return ImpactRuleSummary(
+        spec=spec,
+        n_total=n_total,
+        n_found=n_found,
+        n_exact=n_exact,
+        n_within_1=n_within_1,
+        n_within_2=n_within_2,
+        mae=mae,
+        px_median=px_med,
+        px_p90=px_p90,
+        predictions=tuple(preds),
+    )
+
+
 def impact_rule_rank_key(summary: ImpactRuleSummary) -> Tuple[Any, ...]:
-    """Rank rules by ±1 hits, exact hits, ±2 hits, found count, and lowest MAE/px."""
+    """Rank rules by ±1 hits, exact hits, ±2 hits, lowest MAE/px, and found count."""
     mae_val = summary.mae if summary.mae is not None else float("inf")
     px_med = summary.px_median if summary.px_median is not None else float("inf")
     return (
         -summary.n_within_1,
         -summary.n_exact,
         -summary.n_within_2,
-        -summary.n_found,
         mae_val,
         px_med,
+        -summary.n_found,
         _FAMILY_ORDER.get(summary.spec.family, 99),
         summary.spec.param_sort,
         summary.spec.name,
@@ -390,11 +534,32 @@ def _fmt_count_of_found(count: int, n_found: int, n_total: int) -> str:
     return f"0/0 (0.0% of {n_total})"
 
 
+def _select_top_rules_for_breakdown(
+    ranked_summaries: Sequence[ImpactRuleSummary],
+) -> List[ImpactRuleSummary]:
+    """Return top 3 ranked rules plus up to 3 top distinct-prediction rules if tied."""
+    chosen: List[ImpactRuleSummary] = list(ranked_summaries[:3])
+    seen_names = {s.spec.name for s in chosen}
+    seen_sigs = {tuple(p.pred_frame for p in s.predictions) for s in chosen}
+    distinct_count = len(seen_sigs)
+    for s in ranked_summaries[3:]:
+        if distinct_count >= 3:
+            break
+        sig = tuple(p.pred_frame for p in s.predictions)
+        if sig not in seen_sigs and s.spec.name not in seen_names:
+            chosen.append(s)
+            seen_names.add(s.spec.name)
+            seen_sigs.add(sig)
+            distinct_count += 1
+    return chosen
+
+
 def render_impact_markdown(
     run_name: str,
     clips: Sequence[ImpactClipInput],
     ranked_summaries: Sequence[ImpactRuleSummary],
     loo_results: Sequence[ImpactLooResult],
+    deviation_summary: Optional[ImpactRuleSummary] = None,
 ) -> str:
     """Format ranked table, LOO CV, best-3 per-clip errors, and wrong clips."""
     lines: List[str] = [
@@ -408,6 +573,17 @@ def render_impact_markdown(
         "| Rank | Rule | Found | Exact (0) | Within ±1 | Within ±2 | MAE (frames) | Px Dist (med / p90) |",
         "|---:|---|---:|---:|---:|---:|---:|---:|",
     ]
+    if deviation_summary is not None:
+        s = deviation_summary
+        found_pct = (100.0 * s.n_found / s.n_total) if s.n_total else 0.0
+        px_s = f"{_fmt_opt(s.px_median, '.1f')} / {_fmt_opt(s.px_p90, '.1f')}"
+        lines.append(
+            f"| ref | {s.spec.name} | {s.n_found}/{s.n_total} ({found_pct:.1f}%) | "
+            f"{_fmt_count_of_found(s.n_exact, s.n_found, s.n_total)} | "
+            f"{_fmt_count_of_found(s.n_within_1, s.n_found, s.n_total)} | "
+            f"{_fmt_count_of_found(s.n_within_2, s.n_found, s.n_total)} | "
+            f"{_fmt_opt(s.mae, '.2f')} | {px_s} |"
+        )
     for rank, s in enumerate(ranked_summaries, start=1):
         found_pct = (100.0 * s.n_found / s.n_total) if s.n_total else 0.0
         px_s = f"{_fmt_opt(s.px_median, '.1f')} / {_fmt_opt(s.px_p90, '.1f')}"
@@ -457,8 +633,8 @@ def render_impact_markdown(
                 f"{_fmt_opt(fold.px_error, '.1f')} |"
             )
 
-    best3 = list(ranked_summaries[:3])
-    if best3:
+    best_rules = _select_top_rules_for_breakdown(ranked_summaries)
+    if best_rules:
         lines.extend(
             [
                 "",
@@ -466,12 +642,12 @@ def render_impact_markdown(
                 "",
             ]
         )
-        header_cols = ["Clip", "Ball", "Label"] + [s.spec.name for s in best3]
+        header_cols = ["Clip", "Ball", "Label"] + [s.spec.name for s in best_rules]
         lines.append("| " + " | ".join(header_cols) + " |")
-        lines.append("|---|---|---:|" + "---:|" * len(best3))
+        lines.append("|---|---|---:|" + "---:|" * len(best_rules))
         for idx, clip in enumerate(clips):
             row = [clip.clip_id, clip.ball_colour, str(clip.label_frame)]
-            for s in best3:
+            for s in best_rules:
                 p = s.predictions[idx]
                 row.append(_fmt_signed(p.frame_error))
             lines.append("| " + " | ".join(row) + " |")
@@ -483,7 +659,7 @@ def render_impact_markdown(
                 "",
             ]
         )
-        for s in best3:
+        for s in best_rules:
             missed = [p for p in s.predictions if p.frame_error is None]
             outside_1 = [
                 p for p in s.predictions if p.frame_error is not None and abs(p.frame_error) > 1
@@ -540,13 +716,26 @@ def evaluate_impact_run(
     specs = build_impact_rule_specs()
     summaries = [evaluate_impact_rule(spec, clips) for spec in specs]
     ranked = sorted(summaries, key=impact_rule_rank_key)
+    dev_summary = evaluate_system_deviation(clips)
 
     i1_specs = [s for s in specs if s.family == "I1"]
     i4_specs = [s for s in specs if s.family == "I4"]
+    i5a_specs = [s for s in specs if s.family == "I5a"]
+    i5b_specs = [s for s in specs if s.family == "I5b"]
+    i5_specs = [s for s in specs if s.family in ("I5a", "I5b")]
+    i6a_specs = [s for s in specs if s.family == "I6a"]
+    i6b_specs = [s for s in specs if s.family == "I6b"]
+    i6_specs = [s for s in specs if s.family in ("I6a", "I6b")]
     loo_results = [
         run_impact_leave_one_out(i1_specs, clips, "I1 (theta)"),
         run_impact_leave_one_out(i4_specs, clips, "I4 (+1 vs last_seen)"),
-        run_impact_leave_one_out(specs, clips, "ALL (I1..I4)"),
+        run_impact_leave_one_out(i5a_specs, clips, "I5a (up, theta)"),
+        run_impact_leave_one_out(i5b_specs, clips, "I5b (up, theta)"),
+        run_impact_leave_one_out(i5_specs, clips, "I5 (I5a + I5b)"),
+        run_impact_leave_one_out(i6a_specs, clips, "I6a (up, theta)"),
+        run_impact_leave_one_out(i6b_specs, clips, "I6b (up, theta)"),
+        run_impact_leave_one_out(i6_specs, clips, "I6 (I6a + I6b)"),
+        run_impact_leave_one_out(specs, clips, "ALL (I1..I6)"),
     ]
 
     analysis_dir.mkdir(parents=True, exist_ok=True)
@@ -557,6 +746,7 @@ def evaluate_impact_run(
             clips=clips,
             ranked_summaries=ranked,
             loo_results=loo_results,
+            deviation_summary=dev_summary,
         ),
         encoding="utf-8",
     )
