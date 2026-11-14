@@ -60,6 +60,7 @@ from .errors import (
 from .impact_vertex import find_impact_vertex, find_post_impact_points
 from .release_flight import find_release_flight
 from .shadow_filter import reject_ball_shadows_legacy
+from . import zone_scale
 from .zones_classify import classify_bounce
 
 
@@ -831,6 +832,9 @@ def process_video(
 ) -> dict:
     """Process one delivery video end-to-end. See spec §3.1 and §4."""
     start_time = time.time()
+    _zone_scale_mode = zone_scale.apply(
+        os.environ.get("TRACKER_ZONE_SCALE", "legacy")
+    )
     video_path = Path(video_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -862,12 +866,13 @@ def process_video(
 
     # ── Validate calibration ─────────────────────────────────────────────────
     markers = _validate_calibration(calibration, width, height)
+    zone_markers = zone_scale.markers_for_zones(markers, _zone_scale_mode)
     try:
         grid_corners = compute_grid_corners({k: list(v) for k, v in markers.items()})
     except Exception as e:
         cap.release()
         raise HomographyFailedError(str(e)) from e
-    if build_homography(markers) is None:
+    if build_homography(zone_markers) is None:
         cap.release()
         raise HomographyFailedError("degenerate marker layout")
 
@@ -1361,7 +1366,7 @@ def process_video(
                 freeze_frame=freeze_f,
                 release_f=release_f,
                 post_end_f=post_end_f,
-                markers={k: list(v) for k, v in markers.items()},
+                markers={k: list(v) for k, v in zone_markers.items()},
             )
     elif have_release and have_bounce and have_dev:
         release_pt = (release.x, release.y)
@@ -1378,7 +1383,7 @@ def process_video(
                 if release_f <= ff <= bounce_f
             ],
             rel_to_bounce_frame_range=(release_f, bounce_f),
-            markers={k: list(v) for k, v in markers.items()},
+            markers={k: list(v) for k, v in zone_markers.items()},
         )
 
     # ── Segment timestamps in the OUTPUT video timeline ─────────────────────
@@ -1514,7 +1519,7 @@ def process_video(
     bounce_obj = None
     if have_bounce:
         bf, bx, by = bounce
-        zone, length_m = classify_bounce(markers, (bx, by))
+        zone, length_m = classify_bounce(zone_markers, (bx, by))
         cell = pixel_to_grid_cell((bx, by), grid_corners) if grid_corners else None
         bounce_obj = {
             "frame": int(bf), "timestamp_sec": _ts(bf),
@@ -1570,6 +1575,7 @@ def process_video(
         "schema_version": 1,
         "job_id": job_id or output_dir.name,
         "ball_type": _ball_type,
+        "zone_scale": _zone_scale_mode,
         "video": {
             "filename": video_filename or video_path.name,
             "fps": float(fps),
