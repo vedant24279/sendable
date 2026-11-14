@@ -17,3 +17,4 @@ tools/annotator/calib_report.csv
 # Local pipeline virtual environment
 backend/.venv-pipeline/
 eval/runs/
+eval/labels/_audit.jsonl
