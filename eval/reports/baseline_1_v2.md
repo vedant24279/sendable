@@ -47,6 +47,9 @@
 | **Bounce — Marker offset**: signed `dy` (`marker - label`, mean / median) | 13 | 10.48 px / 10.20 px |
 | **Bounce — Marker offset**: `dy / box_height` (median / mean) | 13 | 0.639 / 0.673 |
 | Impact (`events.impact` non-null share) | 14 | 0/14 (0.0%) |
+| Impact on contact clips (`events.impact` present) | 14 | 0/14 (0.0%) |
+| Impact frame error (`0` / `±1` / `±2` frames) | 0 | — / — / — (signed mean=—, med\|err\|=—, p90=—) |
+| Impact pixel distance (median / p90) | 0 | — / — |
 | Deviation candidate (`events.deviation` present on contact clips) | 14 | 13/14 (92.9%) |
 | Deviation vs Impact frame error (`0` / `±1` / `±2` frames) | 13 | 15.4% / 46.2% / 76.9% (med\|err\|=2.0, p90=3.0) |
 | Deviation vs Impact pixel distance (median / p90) | 13 | 55.0 px / 108.2 px |
@@ -75,22 +78,22 @@
 
 ### 3.3 Per-Clip Detail Table
 
-| Clip ID | Ball | Split | Unclear | Rel Err (f / px) | As-rep Bnc (f / px / m) | Centre vs Centre (`status`: `dx`,`dy` / px / m) | Marker Offset (`dx`,`dy` / `dy/h`) | `pitch_z` Err rep/ctr (m) | Zone (`lbl` -> `rep` / `recomp`) | Dev vs Imp (f / px) | Runtime (s) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: |
-| `c_09a18d5f` | `pink` | `none` | `no` | -2f / 101.5px | -8f / 48.3px / 0.539m | `exact`: -46.2,8.1 / 46.9px / 0.383m | -46.2,14.1 / 1.18 | 0.457 / 0.253 | `GOOD` -> `GOOD` / `GOOD` | 0f / 7.1px | 9.48 |
-| `c_13f43606` | `pink` | `none` | `no` | -4f / 188.3px | 0f / 8.1px / 0.375m | `exact`: 0.6,0.1 / 0.6px / 0.006m | 0.6,8.1 / 0.54 | 0.375 / 0.005 | `FULL` -> `GOOD` / `FULL` | 2f / 81.4px | 7.55 |
-| `c_3d27ed64` | `pink` | `dev` | `no` | 0f / 2.2px | 0f / 5.9px / 0.236m | `exact`: -1.9,-2.4 / 3.1px / 0.102m | -1.9,5.6 / 0.37 | 0.235 / -0.102 | `FULL` -> `GOOD` / `FULL` | 3f / 81.0px | 9.16 |
-| `c_3f1fc736` | `pink` | `none` | `no` | -1f / 9.8px | 0f / 8.5px / 0.345m | `exact`: -1.1,-1.6 / 1.9px / 0.066m | -1.1,8.4 / 0.44 | 0.345 / -0.066 | `GOOD` -> `SHORT` / `GOOD` | 2f / 84.8px | 8.40 |
-| `c_41dd8473` | `pink` | `none` | `no` | -3f / 122.9px | 0f / 3.8px / 0.125m | `exact`: -1.8,-2.7 / 3.2px / 0.102m | -1.8,3.3 / 0.27 | 0.125 / -0.102 | `GOOD` -> `GOOD` / `GOOD` | 1f / 17.1px | 9.60 |
-| `c_542fca8b` | `pink` | `none` | `no` | -3f / 158.1px | 0f / 22.2px / 0.912m | `exact`: 3.6,8.9 / 9.6px / 0.373m | 3.6,21.9 / 0.84 | 0.912 / 0.373 | `FULL` -> `GOOD` / `FULL` | -1f / 4.2px | 7.63 |
-| `c_5cef27ce` | `pink` | `dev` | `no` | -1f / 8.5px | 0f / 11.8px / 0.594m | `exact`: -0.7,0.8 / 1.1px / 0.041m | -0.7,11.8 / 0.56 | 0.594 / 0.040 | `FULL` -> `FULL` / `FULL` | -1f / 15.2px | 10.24 |
-| `c_5e5ea872` | `pink` | `dev` | `no` | 0f / 2.3px | 0f / 6.0px / 0.253m | `exact`: 0.3,-2.0 / 2.0px / 0.085m | 0.3,6.0 / 0.40 | 0.253 / -0.085 | `FULL` -> `GOOD` / `FULL` | 0f / 16.1px | 6.27 |
-| `c_69ba9415` | `red` | `none` | `no` | 2f / 36.1px | missed | missed | missed | — / — | `FULL` -> `—` / `—` | none | 9.52 |
-| `c_6e281881` | `red` | `none` | `no` | 0f / 2.3px | -1f / 15.1px / 0.512m | `exact`: -8.6,6.4 / 10.7px / 0.269m | -8.6,12.4 / 1.03 | 0.509 / 0.264 | `FULL` -> `FULL` / `FULL` | 24f / 159.4px | 10.45 |
-| `c_77d7834d` | `pink` | `none` | `no` | -4f / 173.9px | -1f / 9.6px / 0.270m | `exact`: -5.5,1.9 / 5.8px / 0.071m | -5.5,7.9 / 0.66 | 0.267 / 0.062 | `GOOD` -> `GOOD` / `GOOD` | 2f / 79.6px | 7.01 |
-| `c_a473c3f0` | `pink` | `dev` | `no` | -3f / 185.0px | -1f / 20.8px / 0.723m | `exact`: -14.3,8.1 / 16.4px / 0.396m | -14.3,15.1 / 1.08 | 0.719 / 0.389 | `FULL` -> `GOOD` / `FULL` | 3f / 114.1px | 6.88 |
-| `c_e6b5e8a3` | `pink` | `none` | `no` | -4f / 171.8px | 0f / 11.5px / 0.489m | `exact`: -0.1,2.5 / 2.5px / 0.107m | -0.1,11.5 / 0.64 | 0.489 / 0.107 | `FULL` -> `FULL` / `FULL` | 1f / 39.1px | 8.10 |
-| `c_f51f593e` | `red` | `none` | `no` | 0f / 1.5px | 0f / 10.4px / 0.472m | `exact`: -1.9,3.2 / 3.7px / 0.149m | -1.9,10.2 / 0.73 | 0.472 / 0.148 | `GOOD` -> `GOOD` / `GOOD` | 2f / 55.0px | 10.41 |
+| Clip ID | Ball | Split | Unclear | Rel Err (f / px) | As-rep Bnc (f / px / m) | Centre vs Centre (`status`: `dx`,`dy` / px / m) | Marker Offset (`dx`,`dy` / `dy/h`) | `pitch_z` Err rep/ctr (m) | Zone (`lbl` -> `rep` / `recomp`) | Impact Err (f / px) | Dev vs Imp (f / px) | Runtime (s) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: |
+| `c_09a18d5f` | `pink` | `none` | `no` | -2f / 101.5px | -8f / 48.3px / 0.539m | `exact`: -46.2,8.1 / 46.9px / 0.383m | -46.2,14.1 / 1.18 | 0.457 / 0.253 | `GOOD` -> `GOOD` / `GOOD` | none | 0f / 7.1px | 9.48 |
+| `c_13f43606` | `pink` | `none` | `no` | -4f / 188.3px | 0f / 8.1px / 0.375m | `exact`: 0.6,0.1 / 0.6px / 0.006m | 0.6,8.1 / 0.54 | 0.375 / 0.005 | `FULL` -> `GOOD` / `FULL` | none | 2f / 81.4px | 7.55 |
+| `c_3d27ed64` | `pink` | `dev` | `no` | 0f / 2.2px | 0f / 5.9px / 0.236m | `exact`: -1.9,-2.4 / 3.1px / 0.102m | -1.9,5.6 / 0.37 | 0.235 / -0.102 | `FULL` -> `GOOD` / `FULL` | none | 3f / 81.0px | 9.16 |
+| `c_3f1fc736` | `pink` | `none` | `no` | -1f / 9.8px | 0f / 8.5px / 0.345m | `exact`: -1.1,-1.6 / 1.9px / 0.066m | -1.1,8.4 / 0.44 | 0.345 / -0.066 | `GOOD` -> `SHORT` / `GOOD` | none | 2f / 84.8px | 8.40 |
+| `c_41dd8473` | `pink` | `none` | `no` | -3f / 122.9px | 0f / 3.8px / 0.125m | `exact`: -1.8,-2.7 / 3.2px / 0.102m | -1.8,3.3 / 0.27 | 0.125 / -0.102 | `GOOD` -> `GOOD` / `GOOD` | none | 1f / 17.1px | 9.60 |
+| `c_542fca8b` | `pink` | `none` | `no` | -3f / 158.1px | 0f / 22.2px / 0.912m | `exact`: 3.6,8.9 / 9.6px / 0.373m | 3.6,21.9 / 0.84 | 0.912 / 0.373 | `FULL` -> `GOOD` / `FULL` | none | -1f / 4.2px | 7.63 |
+| `c_5cef27ce` | `pink` | `dev` | `no` | -1f / 8.5px | 0f / 11.8px / 0.594m | `exact`: -0.7,0.8 / 1.1px / 0.041m | -0.7,11.8 / 0.56 | 0.594 / 0.040 | `FULL` -> `FULL` / `FULL` | none | -1f / 15.2px | 10.24 |
+| `c_5e5ea872` | `pink` | `dev` | `no` | 0f / 2.3px | 0f / 6.0px / 0.253m | `exact`: 0.3,-2.0 / 2.0px / 0.085m | 0.3,6.0 / 0.40 | 0.253 / -0.085 | `FULL` -> `GOOD` / `FULL` | none | 0f / 16.1px | 6.27 |
+| `c_69ba9415` | `red` | `none` | `no` | 2f / 36.1px | missed | missed | missed | — / — | `FULL` -> `—` / `—` | none | none | 9.52 |
+| `c_6e281881` | `red` | `none` | `no` | 0f / 2.3px | -1f / 15.1px / 0.512m | `exact`: -8.6,6.4 / 10.7px / 0.269m | -8.6,12.4 / 1.03 | 0.509 / 0.264 | `FULL` -> `FULL` / `FULL` | none | 24f / 159.4px | 10.45 |
+| `c_77d7834d` | `pink` | `none` | `no` | -4f / 173.9px | -1f / 9.6px / 0.270m | `exact`: -5.5,1.9 / 5.8px / 0.071m | -5.5,7.9 / 0.66 | 0.267 / 0.062 | `GOOD` -> `GOOD` / `GOOD` | none | 2f / 79.6px | 7.01 |
+| `c_a473c3f0` | `pink` | `dev` | `no` | -3f / 185.0px | -1f / 20.8px / 0.723m | `exact`: -14.3,8.1 / 16.4px / 0.396m | -14.3,15.1 / 1.08 | 0.719 / 0.389 | `FULL` -> `GOOD` / `FULL` | none | 3f / 114.1px | 6.88 |
+| `c_e6b5e8a3` | `pink` | `none` | `no` | -4f / 171.8px | 0f / 11.5px / 0.489m | `exact`: -0.1,2.5 / 2.5px / 0.107m | -0.1,11.5 / 0.64 | 0.489 / 0.107 | `FULL` -> `FULL` / `FULL` | none | 1f / 39.1px | 8.10 |
+| `c_f51f593e` | `red` | `none` | `no` | 0f / 1.5px | 0f / 10.4px / 0.472m | `exact`: -1.9,3.2 / 3.7px / 0.149m | -1.9,10.2 / 0.73 | 0.472 / 0.148 | `GOOD` -> `GOOD` / `GOOD` | none | 2f / 55.0px | 10.41 |
 
 ### 3.4 Bounce Zone Agreement & Confusion Matrix (Recomputed from System Centre)
 

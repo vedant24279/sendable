@@ -268,6 +268,14 @@ def score_clip(
             if f_idx is not None:
                 traj_by_frame[f_idx] = pt
 
+    raw_traj_post = results.get("trajectory_post") or []
+    traj_with_post_by_frame: Dict[int, Dict[str, Any]] = dict(traj_by_frame)
+    for pt in raw_traj_post:
+        if isinstance(pt, dict):
+            f_idx = _safe_int(pt.get("frame"))
+            if f_idx is not None and f_idx not in traj_with_post_by_frame:
+                traj_with_post_by_frame[f_idx] = pt
+
     lbl_release = label.get("release") or {}
     lbl_bounce = label.get("bounce") or {}
     lbl_impact = label.get("impact") or {}
@@ -276,7 +284,9 @@ def score_clip(
     lbl_last_vis = _safe_int(label.get("last_visible_frame"))
 
     cov_rel_to_imp = _compute_segment_coverage(lbl_rel_frame, lbl_imp_frame, traj_by_frame)
-    cov_imp_to_last = _compute_segment_coverage(lbl_imp_frame, lbl_last_vis, traj_by_frame)
+    cov_imp_to_last = _compute_segment_coverage(
+        lbl_imp_frame, lbl_last_vis, traj_with_post_by_frame
+    )
 
     events = results.get("events") or {}
 
@@ -438,6 +448,17 @@ def score_clip(
     if isinstance(sys_impact, dict) and sys_impact.get("type") is not None:
         sys_impact_type = str(sys_impact.get("type")).lower()
 
+    imp_frame_error: Optional[int] = None
+    imp_px_error: Optional[float] = None
+    if has_lbl_impact_contact and sys_impact_present:
+        imp_f = _safe_int(sys_impact.get("frame"))
+        imp_x = _safe_float(sys_impact.get("x"))
+        imp_y = _safe_float(sys_impact.get("y"))
+        if imp_f is not None:
+            imp_frame_error = imp_f - lbl_imp_frame
+        if imp_x is not None and imp_y is not None:
+            imp_px_error = float(math.hypot(imp_x - lbl_imp_x, imp_y - lbl_imp_y))
+
     sys_deviation = events.get("deviation")
     deviation_present = (
         isinstance(sys_deviation, dict) and _safe_int(sys_deviation.get("frame")) is not None
@@ -516,6 +537,8 @@ def score_clip(
         "has_lbl_impact_contact": has_lbl_impact_contact,
         "sys_impact_present": sys_impact_present,
         "sys_impact_type": sys_impact_type,
+        "impact_frame_error": imp_frame_error,
+        "impact_px_error": imp_px_error,
         "deviation_present": deviation_present,
         "deviation_frame_error": dev_frame_error,
         "deviation_px_error": dev_px_error,
@@ -820,6 +843,21 @@ def _summarize_slice(
     dev_all_count = sum(1 for c in imp_all if c.get("deviation_present"))
 
     imp_contact_pool = [c for c in clear if c.get("has_lbl_impact_contact")]
+    imp_on_contact = [c for c in imp_contact_pool if c.get("sys_impact_present")]
+    imp_f_errs = [
+        int(c["impact_frame_error"])
+        for c in imp_on_contact
+        if c.get("impact_frame_error") is not None
+    ]
+    imp_abs_f_errs = [abs(e) for e in imp_f_errs]
+    imp_px_errs = [
+        float(c["impact_px_error"])
+        for c in imp_on_contact
+        if c.get("impact_px_error") is not None
+    ]
+    imp_f_med, imp_f_p90 = _median_and_p90(imp_abs_f_errs)
+    imp_px_med, imp_px_p90 = _median_and_p90(imp_px_errs)
+
     dev_on_contact = [c for c in imp_contact_pool if c.get("deviation_present")]
     dev_f_errs = [
         int(c["deviation_frame_error"])
@@ -859,6 +897,17 @@ def _summarize_slice(
         "deviation_present_count": dev_all_count,
         "deviation_present_share": (dev_all_count / len(imp_all)) if imp_all else None,
         "n_contact_labelled": len(imp_contact_pool),
+        "n_impact_on_contact": len(imp_f_errs),
+        "impact_on_contact_share": (
+            len(imp_on_contact) / len(imp_contact_pool) if imp_contact_pool else None
+        ),
+        "impact_frame_error_signed_mean": _mean(imp_f_errs),
+        "impact_frame_abs_error_median": imp_f_med,
+        "impact_frame_abs_error_p90": imp_f_p90,
+        "impact_within_tolerance": _shares_within_tolerances(imp_f_errs, tolerances),
+        "impact_pixel_error_median": imp_px_med,
+        "impact_pixel_error_p90": imp_px_p90,
+        "impact_pixel_error_mean": _mean(imp_px_errs),
         "n_deviation_on_contact": len(dev_f_errs),
         "deviation_on_contact_share": (
             len(dev_on_contact) / len(imp_contact_pool) if imp_contact_pool else None
@@ -1173,6 +1222,8 @@ def format_per_clip_csv(clip_scores: Sequence[Dict[str, Any]]) -> str:
         "zone_match_recomputed",
         "label_impact_type",
         "sys_impact_present",
+        "impact_frame_error",
+        "impact_px_error",
         "deviation_present",
         "deviation_frame_error",
         "deviation_px_error",
@@ -1381,6 +1432,21 @@ def format_markdown_report(summary: Dict[str, Any], run_name: str) -> str:
         f"{imp['sys_impact_non_null_count']}/{imp['n_clips']} ({_fmt_pct(imp['sys_impact_non_null_share'])}) |"
     )
     lines.append(
+        f"| Impact on contact clips (`events.impact` present) | {imp['n_contact_labelled']} | "
+        f"{imp['n_impact_on_contact']}/{imp['n_contact_labelled']} ({_fmt_pct(imp['impact_on_contact_share'])}) |"
+    )
+    lines.append(
+        f"| Impact frame error (`0` / `±{t1}` / `±{t2}` frames) | {imp['n_impact_on_contact']} | "
+        f"{_fmt_pct(imp['impact_within_tolerance'].get(t0))} / "
+        f"{_fmt_pct(imp['impact_within_tolerance'].get(t1))} / "
+        f"{_fmt_pct(imp['impact_within_tolerance'].get(t2))} "
+        f"(signed mean={_fmt_num(imp['impact_frame_error_signed_mean'], 2)}, med\\|err\\|={_fmt_num(imp['impact_frame_abs_error_median'], 1)}, p90={_fmt_num(imp['impact_frame_abs_error_p90'], 1)}) |"
+    )
+    lines.append(
+        f"| Impact pixel distance (median / p90) | {imp['n_impact_on_contact']} | "
+        f"{_fmt_num(imp['impact_pixel_error_median'], 1, ' px')} / {_fmt_num(imp['impact_pixel_error_p90'], 1, ' px')} |"
+    )
+    lines.append(
         f"| Deviation candidate (`events.deviation` present on contact clips) | {imp['n_contact_labelled']} | "
         f"{imp['n_deviation_on_contact']}/{imp['n_contact_labelled']} ({_fmt_pct(imp['deviation_on_contact_share'])}) |"
     )
@@ -1455,10 +1521,10 @@ def format_markdown_report(summary: Dict[str, Any], run_name: str) -> str:
     lines.append(
         "| Clip ID | Ball | Split | Unclear | Rel Err (f / px) | As-rep Bnc (f / px / m) | "
         "Centre vs Centre (`status`: `dx`,`dy` / px / m) | Marker Offset (`dx`,`dy` / `dy/h`) | "
-        "`pitch_z` Err rep/ctr (m) | Zone (`lbl` -> `rep` / `recomp`) | Dev vs Imp (f / px) | Runtime (s) |"
+        "`pitch_z` Err rep/ctr (m) | Zone (`lbl` -> `rep` / `recomp`) | Impact Err (f / px) | Dev vs Imp (f / px) | Runtime (s) |"
     )
     lines.append(
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: |"
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: |"
     )
     for c in summary["per_clip"]:
         rel_str = (
@@ -1490,6 +1556,11 @@ def format_markdown_report(summary: Dict[str, Any], run_name: str) -> str:
                 f"{_fmt_num(c.get('bounce_marker_dx'), 1)},{_fmt_num(c.get('bounce_marker_dy'), 1)} / "
                 f"{_fmt_num(c.get('bounce_marker_dy_over_box_height'), 2)}"
             )
+        imp_str = (
+            f"{c.get('impact_frame_error')}f / {_fmt_num(c.get('impact_px_error'), 1)}px"
+            if c.get("sys_impact_present") and c.get("has_lbl_impact_contact")
+            else ("present (no-contact)" if c.get("sys_impact_present") else "none")
+        )
         dev_str = (
             f"{c.get('deviation_frame_error')}f / {_fmt_num(c.get('deviation_px_error'), 1)}px"
             if c.get("deviation_present") and c.get("has_lbl_impact_contact")
@@ -1501,7 +1572,7 @@ def format_markdown_report(summary: Dict[str, Any], run_name: str) -> str:
             f"{cc_str} | {mo_str} | "
             f"{_fmt_num(c.get('bounce_pitch_z_error_m'), 3)} / {_fmt_num(c.get('bounce_centre_pitch_z_error_m'), 3)} | "
             f"`{c.get('label_zone') or '—'}` -> `{c.get('system_zone') or '—'}` / `{c.get('system_zone_recomputed') or '—'}` | "
-            f"{dev_str} | {_fmt_num(c.get('processing_time_sec'), 2)} |"
+            f"{imp_str} | {dev_str} | {_fmt_num(c.get('processing_time_sec'), 2)} |"
         )
     lines.append("")
 

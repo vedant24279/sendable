@@ -57,6 +57,7 @@ from .errors import (
     NoBallDetectedError,
     PipelineCancelled,
 )
+from .impact_vertex import find_impact_vertex, find_post_impact_points
 from .release_flight import find_release_flight
 from .shadow_filter import reject_ball_shadows_legacy
 from .zones_classify import classify_bounce
@@ -815,6 +816,18 @@ def process_video(
             release.y = int(_ry)
             release_f = int(_rf)
 
+    _impact_mode = (
+        os.environ.get("TRACKER_IMPACT_MODE", "").strip().lower() == "vertex"
+    )
+    _vertex_impact = None
+    trajectory_post_points: list[dict] = []
+    if _impact_mode and have_bounce:
+        _vertex_impact = find_impact_vertex(detections_by_frame, markers, bounce_f)
+        if _vertex_impact is not None:
+            trajectory_post_points = find_post_impact_points(
+                detections_by_frame, markers, _vertex_impact["frame"]
+            )
+
     # Prefer the earliest cluster of valid ball detections as release.
     # The streaming ReleaseDetector picks the first 3-frame streak whose
     # speed ratio stays within 0.5×–2× — that gate is conservative and on
@@ -1153,7 +1166,16 @@ def process_video(
         }
 
     impact_obj = None  # ImpactDetector is a stub (spec §2.1 / §4)
-    if impact_detector.impact is not None:  # future-proof; currently never True
+    if _vertex_impact is not None:
+        impact_obj = {
+            "frame": int(_vertex_impact["frame"]),
+            "x": int(_vertex_impact["x"]),
+            "y": int(_vertex_impact["y"]),
+            "timestamp_sec": _ts(int(_vertex_impact["frame"])),
+            "source": "vertex",
+            "type": None,
+        }
+    elif impact_detector.impact is not None:  # future-proof; currently never True
         ip = impact_detector.impact
         impact_obj = {
             "frame": int(ip.frame),
@@ -1211,6 +1233,7 @@ def process_video(
             "deviation": deviation_obj,
         },
         "trajectory": trajectory_points,
+        "trajectory_post": trajectory_post_points,
         "segments": segments_obj,
         "stats": {
             "frames_with_ball": int(frames_with_ball),

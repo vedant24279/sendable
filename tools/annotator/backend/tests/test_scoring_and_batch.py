@@ -696,3 +696,94 @@ def test_score_cli_out_name_and_detections_csv(tmp_path: Path) -> None:
     assert summary["overall"]["bounce_marker_offset"]["dy_over_box_height_median"] == pytest.approx(0.5, abs=1e-6)
     assert summary["overall"]["bounce_centre_vs_centre"]["dx_median"] == pytest.approx(0.0, abs=1e-6)
     assert summary["overall"]["bounce_centre_vs_centre"]["dy_median"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_score_impact_event_and_trajectory_post_coverage() -> None:
+    calib_gt = _make_synthetic_calibration_gt()
+    contact_label = {
+        "schema_version": 1,
+        "clip_id": "c_imp1",
+        "status": "final",
+        "split": "dev",
+        "ball_colour": "white",
+        "release": {"frame": 5, "x": 500.0, "y": 300.0},
+        "bounce": {"frame": 12, "x": 510.0, "y": 600.0, "kind": "pitch"},
+        "impact": {"type": "pad", "frame": 18, "x": 520.0, "y": 420.0},
+        "last_visible_frame": 22,
+        "flags": [],
+        "calibration_gt": calib_gt,
+    }
+    # Post-impact interval is [18..22] = 5 frames.
+    # trajectory has frame 18; trajectory_post has frames 19, 20, 22 -> 4/5 = 0.80 coverage.
+    contact_results = {
+        "video": {"frame_count": 30},
+        "events": {
+            "release": {"frame": 5, "x": 500.0, "y": 300.0},
+            "bounce": {"frame": 12, "x": 510.0, "y": 600.0, "zone": "GOOD", "length_m": 6.0},
+            "impact": {"frame": 19, "x": 523.0, "y": 424.0, "source": "vertex", "type": None},
+            "deviation": {"frame": 20, "x": 540.0, "y": 450.0},
+        },
+        "trajectory": [
+            {"frame": f, "x": 500, "y": 400, "interpolated": False} for f in range(5, 19)
+        ],
+        "trajectory_post": [
+            {"frame": 19, "x": 523, "y": 424, "conf": 0.85},
+            {"frame": 20, "x": 530, "y": 430, "conf": 0.82},
+            {"frame": 22, "x": 545, "y": 442, "conf": 0.78},
+        ],
+        "stats": {"processing_time_sec": 1.0},
+    }
+
+    no_contact_label = {
+        "schema_version": 1,
+        "clip_id": "c_none1",
+        "status": "final",
+        "split": "dev",
+        "ball_colour": "white",
+        "release": {"frame": 5, "x": 500.0, "y": 300.0},
+        "bounce": {"frame": 12, "x": 510.0, "y": 600.0, "kind": "pitch"},
+        "impact": {"type": "none", "frame": None, "x": None, "y": None},
+        "last_visible_frame": 22,
+        "flags": [],
+        "calibration_gt": calib_gt,
+    }
+    no_contact_results = {
+        "video": {"frame_count": 30},
+        "events": {
+            "release": {"frame": 5, "x": 500.0, "y": 300.0},
+            "bounce": {"frame": 12, "x": 510.0, "y": 600.0, "zone": "GOOD", "length_m": 6.0},
+            "impact": {"frame": 18, "x": 520.0, "y": 420.0, "source": "vertex", "type": None},
+            "deviation": None,
+        },
+        "trajectory": [
+            {"frame": f, "x": 500, "y": 400, "interpolated": False} for f in range(5, 19)
+        ],
+        "trajectory_post": [],
+        "stats": {"processing_time_sec": 1.0},
+    }
+
+    s_contact = score_clip(contact_label, contact_results)
+    assert s_contact["sys_impact_present"] is True
+    assert s_contact["impact_frame_error"] == 1
+    assert s_contact["impact_px_error"] == pytest.approx(5.0)
+    cov_post = s_contact["coverage_impact_to_last_visible"]
+    assert cov_post["present_frames"] == 4
+    assert cov_post["total_frames"] == 5
+    assert cov_post["coverage_fraction"] == pytest.approx(0.8)
+    assert cov_post["non_interpolated_fraction"] == pytest.approx(0.8)
+
+    s_none = score_clip(no_contact_label, no_contact_results)
+    assert s_none["false_marker_impact"] is True
+
+    agg = aggregate_scores([s_contact, s_none])
+    imp = agg["overall"]["impact"]
+    assert imp["sys_impact_non_null_count"] == 2
+    assert imp["n_impact_on_contact"] == 1
+    assert imp["impact_on_contact_share"] == pytest.approx(1.0)
+    assert imp["impact_within_tolerance"]["0"] == pytest.approx(0.0)
+    assert imp["impact_within_tolerance"]["1"] == pytest.approx(1.0)
+    assert imp["impact_within_tolerance"]["2"] == pytest.approx(1.0)
+    assert imp["impact_pixel_error_median"] == pytest.approx(5.0)
+    assert imp["false_marker_impact_count"] == 1
+    assert imp["false_marker_impact_rate"] == pytest.approx(1.0)
+
