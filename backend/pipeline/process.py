@@ -749,6 +749,59 @@ def process_video(
     bounce_f = bounce[0] if have_bounce else None
     dev_f = dev_changes[0][0] if have_dev else None
 
+    if os.environ.get("TRACKER_DEBUG_DUMP") == "1":
+        try:
+            _ball_dump = {}
+            for _fnum in sorted(detections_by_frame):
+                _cands = []
+                for _d in detections_by_frame[_fnum]:
+                    if _d.get("class_name") != "ball":
+                        continue
+                    _x1 = float(_d["x1"])
+                    _y1 = float(_d["y1"])
+                    _x2 = float(_d["x2"])
+                    _y2 = float(_d["y2"])
+                    _cands.append({
+                        "cx": 0.5 * (_x1 + _x2),
+                        "cy": 0.5 * (_y1 + _y2),
+                        "x1": _x1,
+                        "y1": _y1,
+                        "x2": _x2,
+                        "y2": _y2,
+                        "conf": float(_d.get("conf", 0.0)),
+                    })
+                if _cands:
+                    _ball_dump[str(int(_fnum))] = _cands
+            _streaming_release = (
+                {
+                    "frame": int(release.release_frame),
+                    "x": int(release.x),
+                    "y": int(release.y),
+                }
+                if release is not None
+                else None
+            )
+            _streaming_bounce = (
+                [int(v) if isinstance(v, (int, np.integer)) else float(v) for v in bounce]
+                if bounce is not None
+                else None
+            )
+            (output_dir / "raw_ball_detections.json").write_text(
+                json.dumps(
+                    {
+                        "fps": float(fps),
+                        "frame_count": int(total),
+                        "ball": _ball_dump,
+                        "streaming_release": _streaming_release,
+                        "streaming_bounce": _streaming_bounce,
+                    },
+                    indent=2,
+                ) + "\n",
+                encoding="utf-8",
+            )
+        except Exception as _dbg_exc:
+            print(f"[WARN] TRACKER_DEBUG_DUMP failed: {_dbg_exc}")
+
     # Prefer the earliest cluster of valid ball detections as release.
     # The streaming ReleaseDetector picks the first 3-frame streak whose
     # speed ratio stays within 0.5×–2× — that gate is conservative and on

@@ -139,12 +139,27 @@ def discover_eligible_labels(
     return eligible
 
 
+def parse_env_vars(raw_envs: Optional[Sequence[str]]) -> Dict[str, str]:
+    """Parse repeatable KEY=VALUE pairs into a dictionary."""
+    parsed: Dict[str, str] = {}
+    for item in raw_envs or ():
+        if "=" not in item:
+            raise ValueError(f"Invalid --env entry {item!r}: expected KEY=VALUE")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"Invalid --env entry {item!r}: empty key")
+        parsed[key] = value
+    return parsed
+
+
 def run_batch(
     *,
     run_name: str,
     only_ids: Optional[Set[str]] = None,
     skip_existing: bool = False,
     dry_run: bool = False,
+    extra_env: Optional[Dict[str, str]] = None,
     labels_dir: Optional[Path] = None,
     library_dir: Optional[Path] = None,
     runs_dir: Optional[Path] = None,
@@ -155,6 +170,11 @@ def run_batch(
     run_dir = resolved_runs_dir / run_name
     pipeline_py = resolve_pipeline_python()
     run_clip_script = (BACKEND_DIR / "run_clip.py").resolve()
+    env_overrides = dict(extra_env or {})
+    sub_env: Optional[Dict[str, str]] = None
+    if env_overrides:
+        sub_env = os.environ.copy()
+        sub_env.update(env_overrides)
 
     labels = discover_eligible_labels(resolved_labels_dir, only_ids=only_ids)
     utc_now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -272,6 +292,7 @@ def run_batch(
             proc = subprocess.run(
                 cmd,
                 cwd=str(REPO_ROOT),
+                env=sub_env,
                 capture_output=True,
                 text=True,
                 check=False,
@@ -324,6 +345,7 @@ def run_batch(
         "pipeline_or_worker_dirty": is_pipeline_or_worker_dirty(),
         "legacy_tracker_folder": LEGACY_TRACKER_FOLDER,
         "ball_types": sorted(ball_types_used),
+        "env": env_overrides,
         "clips": clip_records,
     }
 
@@ -381,6 +403,13 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=None,
         help="Optional override for runs directory (defaults to EVAL_RUNS_DIR or eval/runs).",
     )
+    parser.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Repeatable environment variable overrides passed to every run_clip subprocess.",
+    )
     return parser.parse_args(argv)
 
 
@@ -389,11 +418,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     only_ids: Optional[Set[str]] = None
     if args.only:
         only_ids = {part.strip() for part in args.only.split(",") if part.strip()}
+    parsed_env = parse_env_vars(args.env)
     run_batch(
         run_name=args.run_name,
         only_ids=only_ids,
         skip_existing=args.skip_existing,
         dry_run=args.dry_run,
+        extra_env=parsed_env,
         labels_dir=args.labels_dir,
         library_dir=args.library_dir,
         runs_dir=args.runs_dir,
