@@ -1,4 +1,14 @@
 import { Calibration, TrackingResult } from "./types";
+import {
+  bounceToContactPoints,
+  contactEvent,
+  currentPhase,
+  isRenderV2,
+  markersVisible,
+  parabolaProgress,
+  postPoints,
+  progress,
+} from "./renderTimeline";
 
 interface Props {
   result: TrackingResult;
@@ -146,51 +156,10 @@ function BallMarker({ x, y, size, href }: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Segment routing — single source of truth for which segment `currentTime`
-// sits in. Used by Parabolas + BallMarkers to gate visibility/animation.
-// ─────────────────────────────────────────────────────────────────────────────
-type Phase = "before" | "segA" | "segB" | "segC" | "after";
-
-function currentPhase(t: number, segs: TrackingResult["segments"]): Phase {
-  if (t < segs.seg_a_start_sec) return "before";
-  if (t < segs.seg_a_end_sec) return "segA";
-  if (t < segs.seg_b_end_sec) return "segB";
-  if (segs.seg_c_end_sec != null && t < segs.seg_c_end_sec) return "segC";
-  return "after";
-}
-
-interface Progress { rb: number; bd: number; }
-
-function parabolaProgress(
-  t: number, segs: TrackingResult["segments"],
-): Progress {
-  const phase = currentPhase(t, segs);
-  if (phase === "before" || phase === "segA") return { rb: 0, bd: 0 };
-
-  if (phase === "segB") {
-    const r = segs.seg_b_release_sec, b = segs.seg_b_bounce_sec, d = segs.seg_b_deviation_sec;
-    if (r == null || b == null) return { rb: 0, bd: 0 };
-    if (t < r) return { rb: 0, bd: 0 };
-    if (t < b) return { rb: (t - r) / Math.max(1e-6, b - r), bd: 0 };
-    if (d == null) return { rb: 1, bd: 0 };
-    if (t < d) return { rb: 1, bd: (t - b) / Math.max(1e-6, d - b) };
-    return { rb: 1, bd: 1 };
-  }
-
-  if (phase === "segC") {
-    const s = segs.seg_c_start_sec, rEnd = segs.seg_c_rb_end_sec, bEnd = segs.seg_c_bd_end_sec;
-    if (s == null || rEnd == null || bEnd == null) return { rb: 1, bd: 1 };
-    if (t < rEnd) return { rb: (t - s) / Math.max(1e-6, rEnd - s), bd: 0 };
-    if (t < bEnd) return { rb: 1, bd: (t - rEnd) / Math.max(1e-6, bEnd - rEnd) };
-    return { rb: 1, bd: 1 };  // hold
-  }
-
-  return { rb: 1, bd: 1 };  // after — parabola stays fully drawn
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Parabolas + traveling ball (SEG B and SEG C)
 // ─────────────────────────────────────────────────────────────────────────────
+const POST_IMPACT_COLOR = "#f59e0b"; // amber
+
 function fitConstrainedQuadratic(
   pts: { frame: number; x: number; y: number }[],
   x1: number, y1: number, x2: number, y2: number,
@@ -229,16 +198,102 @@ function Parabolas({
   const phase = currentPhase(currentTime, result.segments);
   if (phase === "before" || phase === "segA") return null;  // SEG A: no parabola
 
-  const { rb, bd } = parabolaProgress(currentTime, result.segments);
-
-  // ── release → bounce: constrained quadratic ──────────────────────────────
   const x1 = release.x, y1 = release.y, x2 = bounce.x, y2 = bounce.y;
   const f_lo = release.frame, f_hi = bounce.frame;
   const rbPts = result.trajectory.filter(
     (p) => p.frame >= f_lo && p.frame <= f_hi,
   );
   const { kx, ky } = fitConstrainedQuadratic(rbPts, x1, y1, x2, y2, f_lo, f_hi);
+  const trailColor = TRAJECTORY_COLOR[ballType];
 
+  if (isRenderV2(result.segments)) {
+    const { rb, bi, post } = progress(currentTime, result.segments);
+
+    let rbPath = "";
+    if (rb > 0) {
+      const n = Math.max(2, Math.round(N_PARABOLA_SAMPLES * rb));
+      const pts: string[] = [];
+      for (let i = 0; i < n; i++) {
+        const t = (i / (n - 1)) * rb;
+        const p = pointOnQuad(x1, y1, x2, y2, kx, ky, t);
+        pts.push(`${p.x.toFixed(2)},${p.y.toFixed(2)}`);
+      }
+      rbPath = pts.join(" ");
+    }
+
+    const biPts = bounceToContactPoints(result, bi);
+    const biPath =
+      biPts.length >= 2
+        ? biPts.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ")
+        : "";
+
+    const postPts = postPoints(result, post);
+    const postPath =
+      postPts.length >= 2
+        ? postPts.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ")
+        : "";
+
+    let ballPos: { x: number; y: number } | null = null;
+    if (phase === "segC") {
+      if (rb > 0 && rb < 1) {
+        ballPos = pointOnQuad(x1, y1, x2, y2, kx, ky, rb);
+      } else if (rb >= 1 && bi > 0 && bi < 1 && biPts.length > 0) {
+        ballPos = biPts[biPts.length - 1];
+      } else if (bi >= 1 && post > 0 && post < 1 && postPts.length > 0) {
+        ballPos = postPts[postPts.length - 1];
+      }
+    }
+
+    return (
+      <g>
+        {rbPath && (
+          <polyline
+            points={rbPath}
+            fill="none"
+            stroke={trailColor}
+            strokeWidth={16}
+            strokeOpacity={0.40}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
+        {biPath && (
+          <polyline
+            points={biPath}
+            fill="none"
+            stroke={trailColor}
+            strokeWidth={13}
+            strokeOpacity={0.70}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
+        {postPath && (
+          <polyline
+            points={postPath}
+            fill="none"
+            stroke={POST_IMPACT_COLOR}
+            strokeWidth={10}
+            strokeOpacity={0.8}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
+        {ballPos && (
+          <BallMarker
+            x={ballPos.x}
+            y={ballPos.y}
+            size={BALL_MARKER_SIZE_PX}
+            href={ballHref(ballType)}
+          />
+        )}
+      </g>
+    );
+  }
+
+  const { rb, bd } = parabolaProgress(currentTime, result.segments);
+
+  // ── release → bounce: constrained quadratic ──────────────────────────────
   let rbPath = "";
   if (rb > 0) {
     const n = Math.max(2, Math.round(N_PARABOLA_SAMPLES * rb));
@@ -272,7 +327,6 @@ function Parabolas({
     }
   }
 
-  const trailColor = TRAJECTORY_COLOR[ballType];
   return (
     <g>
       {rbPath && (
@@ -324,17 +378,21 @@ const MISS_COLOR = "#8DFF3F";   // green — would have missed
 function PredictedPath({
   result, currentTime,
 }: { result: TrackingResult; currentTime: number }) {
-  const { bounce, deviation } = result.events;
-  if (!bounce || !deviation) return null;
+  const isV2 = isRenderV2(result.segments);
+  const { bounce } = result.events;
+  const anchor = isV2 ? contactEvent(result.events) : result.events.deviation;
+  if (!bounce || !anchor) return null;
 
   const phase = currentPhase(currentTime, result.segments);
   if (phase === "before" || phase === "segA") return null;
 
-  const { bd } = parabolaProgress(currentTime, result.segments);
-  if (bd < 1) return null;
+  const contactProgress = isV2
+    ? progress(currentTime, result.segments).bi
+    : parabolaProgress(currentTime, result.segments).bd;
+  if (contactProgress < 1) return null;
 
-  const dx = deviation.x - bounce.x;
-  const dy = deviation.y - bounce.y;
+  const dx = anchor.x - bounce.x;
+  const dy = anchor.y - bounce.y;
   if (Math.abs(dx) < 1e-3 && Math.abs(dy) < 1e-3) return null;
 
   // Stump-plane screen geometry, matching StumpSet's calculation exactly so
@@ -351,38 +409,27 @@ function PredictedPath({
   // batter's stumps at the TOP of frame → smaller screen-y is farther.
   const targetY = batStump[1] - stumpHeightPx;
 
-  // Step 1 — locate the STUMP-PLANE CROSSING along the extended line. This
-  // is the point that determines hit vs miss. Three cases:
-  //   (a) deviation sits BELOW the stump-top line and the ball is moving UP
-  //       → forward-project to y = targetY (the normal case)
-  //   (b) deviation sits essentially AT or ABOVE the stump-top line already
-  //       (bail-height bat contact — common on short-of-length balls) →
-  //       use deviation itself as the impact point, don't try to project
-  //   (c) ball is moving horizontally or away from the target → no crossing
+  // Step 1 — locate the STUMP-PLANE CROSSING along the extended line.
   let hitX: number | null = null, hitY: number | null = null;
-  const atOrAboveTarget = deviation.y <= targetY + 1;  // 1 px slop
+  const atOrAboveTarget = anchor.y <= targetY + 1;  // 1 px slop
   if (atOrAboveTarget) {
-    hitX = deviation.x;
-    hitY = deviation.y;
+    hitX = anchor.x;
+    hitY = anchor.y;
   } else if (Math.abs(dy) > 1e-3) {
-    const t = (targetY - deviation.y) / dy;
+    const t = (targetY - anchor.y) / dy;
     if (t > 0.02) {
-      hitX = deviation.x + dx * t;
+      hitX = anchor.x + dx * t;
       hitY = targetY;
     }
   }
 
   // Step 2 — pick a VISUAL end for the dashed line so it reads as a
-  // trajectory rather than a pixel. The stump-plane crossing is often only a
-  // few px past deviation (ball is near bail height at contact), so we
-  // guarantee at least MIN_LINE_LEN of screen length forward. If the ball is
-  // moving mostly parallel to the stump plane (hit crossing near infinity),
-  // fall back to a fraction of segLen.
+  // trajectory rather than a pixel.
   const segLen = Math.sqrt(dx * dx + dy * dy);
   const ux = dx / segLen, uy = dy / segLen;
   const MIN_LINE_LEN = Math.max(60, segLen * 0.35);
   const distToStumpPlane = hitX != null && hitY != null
-    ? Math.sqrt((hitX - deviation.x) ** 2 + (hitY - deviation.y) ** 2)
+    ? Math.sqrt((hitX - anchor.x) ** 2 + (hitY - anchor.y) ** 2)
     : 0;
   const lineLen = Math.max(distToStumpPlane, MIN_LINE_LEN);
 
@@ -395,33 +442,28 @@ function PredictedPath({
   };
   const maxLen = Math.min(
     lineLen,
-    clampToEdge(0 - deviation.x, ux),
-    clampToEdge(W - deviation.x, ux),
-    clampToEdge(0 - deviation.y, uy),
-    clampToEdge(H - deviation.y, uy),
+    clampToEdge(0 - anchor.x, ux),
+    clampToEdge(W - anchor.x, ux),
+    clampToEdge(0 - anchor.y, uy),
+    clampToEdge(H - anchor.y, uy),
   );
-  const endX = deviation.x + ux * maxLen;
-  const endY = deviation.y + uy * maxLen;
+  const endX = anchor.x + ux * maxLen;
+  const endY = anchor.y + uy * maxLen;
 
   // Verdict is based on the STUMP-PLANE crossing, not the drawn line end.
   const wouldHitStumps =
     hitX != null && Math.abs(hitX - batStump[0]) <= halfStumpWidthPx;
   const indicatorFill = wouldHitStumps ? HIT_COLOR : MISS_COLOR;
 
-  // Straight line — over the short bat→stumps distance (~1 m real-world),
-  // gravity's effect on the ball is negligible, so a straight extrapolation
-  // is the honest visualization. White dashes with a black border: two
-  // overlaid lines share the same dasharray + round linecap, so the thicker
-  // black stroke shows around each white dash as a halo.
   return (
     <g>
       <line
-        x1={deviation.x} y1={deviation.y} x2={endX} y2={endY}
+        x1={anchor.x} y1={anchor.y} x2={endX} y2={endY}
         stroke="#000" strokeWidth={7} strokeOpacity={0.9}
         strokeDasharray="10 8" strokeLinecap="round"
       />
       <line
-        x1={deviation.x} y1={deviation.y} x2={endX} y2={endY}
+        x1={anchor.x} y1={anchor.y} x2={endX} y2={endY}
         stroke="#fff" strokeWidth={4.5} strokeOpacity={1}
         strokeDasharray="10 8" strokeLinecap="round"
       />
@@ -434,27 +476,41 @@ function PredictedPath({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Event markers (release / bounce / deviation)
-//   SEG A: progressive reveal at each event's source-frame timestamp.
-//   SEG B: all three visible throughout.
-//   SEG C: none during the parabola sweep; bounce re-appears once the sweep
-//          completes (the "mark the bounce point again" hold).
+// Event markers (release / bounce / impact or deviation)
 // ─────────────────────────────────────────────────────────────────────────────
 function BallMarkers({
   result, currentTime, ballType,
 }: { result: TrackingResult; currentTime: number; ballType: "white" | "red" | "pink" }) {
-  // For red and pink pipelines, release + bounce + deviation are baked
+  const segs = result.segments;
+  const href = ballHref(ballType);
+  const size = BALL_MARKER_SIZE_PX;
+
+  if (isRenderV2(segs)) {
+    const { release, bounce, impact } = result.events;
+    const vis = markersVisible(currentTime, segs);
+    return (
+      <g>
+        {vis.release && release && (
+          <BallMarker x={release.x} y={release.y} size={size} href={href} />
+        )}
+        {vis.bounce && bounce && (
+          <BallMarker x={bounce.x} y={bounce.y} size={size} href={href} />
+        )}
+        {vis.impact && impact && (
+          <BallMarker x={impact.x} y={impact.y} size={size} href={href} />
+        )}
+      </g>
+    );
+  }
+
+  // Legacy path: for red and pink pipelines, release + bounce + deviation are baked
   // directly into output.mp4 (see backend/pipeline/process.py
   // _draw_progressive_overlays). Skip the SVG overlay markers so we don't
-  // double-draw on top of the baked ones. White ball still uses SVG markers
-  // (it doesn't bake them for backwards-compatibility reasons).
+  // double-draw on top of the baked ones. White ball still uses SVG markers.
   if (ballType === "red" || ballType === "pink") return null;
 
   const { release, bounce, deviation } = result.events;
-  const segs = result.segments;
   const phase = currentPhase(currentTime, segs);
-  const href = ballHref(ballType);
-  const size = BALL_MARKER_SIZE_PX;
 
   if (phase === "segA") {
     const showR = release && segs.seg_a_release_sec   != null && currentTime >= segs.seg_a_release_sec;

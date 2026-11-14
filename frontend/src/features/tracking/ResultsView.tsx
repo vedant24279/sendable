@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TrackingResult, ZONE_COLORS } from "./types";
 import { PitchOverlay } from "./PitchOverlay";
+import { isRenderV2 } from "./renderTimeline";
 import { PlayerMarker, VideoPlayer, VideoPlayerHandle } from "./VideoPlayer";
 import { FeedbackModal } from "./FeedbackModal";
 import { getFeedback } from "./api";
@@ -12,12 +13,17 @@ const FB_KEY = (jobId: string) => `tracker_feedback_done:${jobId}`;
 
 export function ResultsView({ result }: { result: TrackingResult }) {
   const playerRef = useRef<VideoPlayerHandle>(null);
+  const isV2 = isRenderV2(result.segments);
   const [showStumps, setShowStumps] = useState(true);
   const [showPitchingLine, setShowPitchingLine] = useState(true);
   const [showBallMarkers, setShowBallMarkers] = useState(true);
   const [showParabola, setShowParabola] = useState(true);
-  const [showPrediction, setShowPrediction] = useState(true);
+  const [showPrediction, setShowPrediction] = useState(() => !isV2);
   const [currentTime, setCurrentTime] = useState(0);
+
+  useEffect(() => {
+    setShowPrediction(!isV2);
+  }, [isV2, result.job_id]);
   const [downloading, setDownloading] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackInitial, setFeedbackInitial] = useState<DeliveryFeedback | null>(null);
@@ -86,33 +92,66 @@ export function ResultsView({ result }: { result: TrackingResult }) {
   // positions inside SEG A's live playback) and fall back to source timestamps
   // for older jobs that lack the segments field.
   const segs = result.segments;
-  const releaseT  = segs?.seg_a_release_sec   ?? result.events.release?.timestamp_sec;
-  const bounceT   = segs?.seg_a_bounce_sec    ?? result.events.bounce?.timestamp_sec;
-  const deviationT = segs?.seg_a_deviation_sec ?? result.events.deviation?.timestamp_sec;
-
   const markers: PlayerMarker[] = [];
-  if (result.events.release && releaseT != null) {
-    markers.push({
-      label: "Release",
-      time: releaseT,
-      color: "var(--accent)",
-    });
-  }
-  if (result.events.bounce && bounceT != null) {
-    markers.push({
-      label: "Bounce",
-      time: bounceT,
-      color: result.events.bounce.zone
-        ? ZONE_COLORS[result.events.bounce.zone]
-        : "var(--good)",
-    });
-  }
-  if (result.events.deviation && deviationT != null) {
-    markers.push({
-      label: "Deviation",
-      time: deviationT,
-      color: "var(--accent)",
-    });
+
+  if (isV2) {
+    const releaseT = segs?.seg_b_release_sec;
+    const bounceT = segs?.seg_b_bounce_sec;
+    const impactT = segs?.seg_b_impact_sec;
+    if (result.events.release && releaseT != null) {
+      markers.push({
+        label: "Release",
+        time: releaseT,
+        color: "var(--accent)",
+      });
+    }
+    if (result.events.bounce && bounceT != null) {
+      markers.push({
+        label: "Bounce",
+        time: bounceT,
+        color: result.events.bounce.zone
+          ? ZONE_COLORS[result.events.bounce.zone]
+          : "var(--good)",
+      });
+    }
+    if (result.events.impact && impactT != null) {
+      markers.push({
+        label: "Impact",
+        time: impactT,
+        color: "var(--accent)",
+      });
+    }
+  } else {
+    const releaseT =
+      segs?.seg_a_release_sec ?? result.events.release?.timestamp_sec;
+    const bounceT =
+      segs?.seg_a_bounce_sec ?? result.events.bounce?.timestamp_sec;
+    const deviationT =
+      segs?.seg_a_deviation_sec ?? result.events.deviation?.timestamp_sec;
+
+    if (result.events.release && releaseT != null) {
+      markers.push({
+        label: "Release",
+        time: releaseT,
+        color: "var(--accent)",
+      });
+    }
+    if (result.events.bounce && bounceT != null) {
+      markers.push({
+        label: "Bounce",
+        time: bounceT,
+        color: result.events.bounce.zone
+          ? ZONE_COLORS[result.events.bounce.zone]
+          : "var(--good)",
+      });
+    }
+    if (result.events.deviation && deviationT != null) {
+      markers.push({
+        label: "Deviation",
+        time: deviationT,
+        color: "var(--accent)",
+      });
+    }
   }
 
   return (
@@ -142,7 +181,7 @@ export function ResultsView({ result }: { result: TrackingResult }) {
             onClick={() => setShowParabola((v) => !v)}
           />
           <ToggleButton
-            label="Predicted path"
+            label={isV2 ? "Predicted path (experimental)" : "Predicted path"}
             on={showPrediction}
             onClick={() => setShowPrediction((v) => !v)}
           />
@@ -235,7 +274,8 @@ function ToggleButton({
 }
 
 function EventCards({ result }: { result: TrackingResult }) {
-  const { release, bounce, deviation } = result.events;
+  const { release, bounce, impact, deviation } = result.events;
+  const isV2 = isRenderV2(result.segments);
   return (
     <div className="cards-row">
       <div className={`event-card ${release ? "" : "null"}`}>
@@ -285,17 +325,33 @@ function EventCards({ result }: { result: TrackingResult }) {
         )}
       </div>
 
-      <div className={`event-card ${deviation ? "" : "null"}`}>
-        <h3>Deviation</h3>
-        {deviation ? (
-          <>
-            <div className="value">{deviation.timestamp_sec.toFixed(2)} s</div>
-            <div className="muted">Frame {deviation.frame}</div>
-          </>
-        ) : (
-          <div className="muted">No deviation point detected.</div>
-        )}
-      </div>
+      {isV2 ? (
+        <div className={`event-card ${impact ? "" : "null"}`}>
+          <h3>Impact</h3>
+          {impact ? (
+            <>
+              <div className="value">{impact.timestamp_sec.toFixed(2)} s</div>
+              <div className="muted">
+                Frame {impact.frame} · ({impact.x}, {impact.y})
+              </div>
+            </>
+          ) : (
+            <div className="muted">No impact detected</div>
+          )}
+        </div>
+      ) : (
+        <div className={`event-card ${deviation ? "" : "null"}`}>
+          <h3>Deviation</h3>
+          {deviation ? (
+            <>
+              <div className="value">{deviation.timestamp_sec.toFixed(2)} s</div>
+              <div className="muted">Frame {deviation.frame}</div>
+            </>
+          ) : (
+            <div className="muted">No deviation point detected.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

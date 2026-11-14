@@ -59,11 +59,22 @@ export interface BounceEvent extends ReleaseEvent {
   grid_cell: [number, number] | null;
 }
 
-export interface ImpactEvent extends ReleaseEvent { reason: string; }
+export interface ImpactEvent extends ReleaseEvent {
+  source?: string | null;
+  type?: string | null;
+  reason?: string;
+}
 
 export interface TrajectoryPoint {
   frame: number; x: number; y: number;
   interpolated: boolean; conf: number | null;
+}
+
+export interface TrajectoryPostPoint {
+  frame: number;
+  x: number;
+  y: number;
+  conf?: number | null;
 }
 
 export interface TrackingResult {
@@ -85,11 +96,13 @@ export interface TrackingResult {
   events: {
     release: ReleaseEvent | null;
     bounce: BounceEvent | null;
-    impact: ImpactEvent | null;
+    impact?: ImpactEvent | null;
     deviation: ReleaseEvent | null;
   };
   trajectory: TrajectoryPoint[];
+  trajectory_post?: TrajectoryPostPoint[];
   segments: {
+    render_mode?: string;
     seg_a_start_sec: number;
     seg_a_end_sec: number;
     seg_a_release_sec: number | null;
@@ -99,10 +112,16 @@ export interface TrackingResult {
     seg_b_end_sec: number;
     seg_b_release_sec: number | null;
     seg_b_bounce_sec: number | null;
+    seg_b_impact_sec?: number | null;
     seg_b_deviation_sec: number | null;
+    seg_b_post_end_sec?: number | null;
+    speed_b?: number;
+    seg_post_end_frame?: number | null;
     seg_c_start_sec: number | null;
     seg_c_rb_end_sec: number | null;
+    seg_c_bi_end_sec?: number | null;
     seg_c_bd_end_sec: number | null;
+    seg_c_post_end_sec?: number | null;
     seg_c_end_sec: number | null;
   };
   stats: {
