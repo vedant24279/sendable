@@ -8,7 +8,10 @@ import pytest
 from pipeline.release_flight import (
     FLIGHT_RUN_K,
     FLIGHT_RUN_T,
+    K,
+    T,
     find_flight_release,
+    find_release_flight,
 )
 
 
@@ -40,6 +43,8 @@ def _det(
 def test_default_constants_match_phase1_selection() -> None:
     assert FLIGHT_RUN_K == 3
     assert FLIGHT_RUN_T == pytest.approx(0.070)
+    assert K == 3
+    assert T == pytest.approx(0.070)
 
 
 def test_swing_then_flight_picks_release_after_arm_swing() -> None:
@@ -58,7 +63,26 @@ def test_swing_then_flight_picks_release_after_arm_swing() -> None:
         6: [_det(800.0, 505.0)],
         7: [_det(800.0, 535.0)],
     }
+    assert find_release_flight(detections, _markers(500.0)) == (4, 800, 460)
     assert find_flight_release(detections, _markers(500.0)) == (4, 800, 460)
+
+
+def test_accepts_cx_cy_candidates_and_dict_markers() -> None:
+    detections = {
+        0: [{"cx": 800.0, "cy": 670.0, "conf": 0.9}],
+        1: [{"cx": 800.0, "cy": 590.0, "conf": 0.9}],
+        2: [{"cx": 800.0, "cy": 530.0, "conf": 0.9}],
+        3: [{"cx": 800.0, "cy": 475.0, "conf": 0.9}],
+        4: [{"cx": 800.0, "cy": 460.0, "conf": 0.9}],
+        5: [{"cx": 800.0, "cy": 480.0, "conf": 0.9}],
+        6: [{"cx": 800.0, "cy": 505.0, "conf": 0.9}],
+        7: [{"cx": 800.0, "cy": 535.0, "conf": 0.9}],
+    }
+    dict_markers = {
+        "bowl_L": {"x": 700.0, "y": 950.0},
+        "bowl_R": {"x": 1200.0, "y": 950.0},
+    }
+    assert find_release_flight(detections, dict_markers) == (4, 800, 460)
 
 
 def test_first_detection_qualifies_on_three_following_steps() -> None:
@@ -68,7 +92,7 @@ def test_first_detection_qualifies_on_three_following_steps() -> None:
         4: [_det(786.0, 464.0)],
         5: [_det(795.0, 470.0)],
     }
-    assert find_flight_release(detections, _markers(376.0)) == (2, 776, 456)
+    assert find_release_flight(detections, _markers(376.0)) == (2, 776, 456)
 
 
 def test_multi_candidate_nearest_neighbour_ignores_distractor() -> None:
@@ -80,7 +104,7 @@ def test_multi_candidate_nearest_neighbour_ignores_distractor() -> None:
         4: [_det(800.0, 475.0, conf=0.7)],
         5: [_det(800.0, 460.0, conf=0.7)],
     }
-    assert find_flight_release(detections, _markers(500.0)) == (2, 800, 505)
+    assert find_release_flight(detections, _markers(500.0)) == (2, 800, 505)
 
 
 def test_returns_none_when_no_detection_qualifies() -> None:
@@ -88,12 +112,12 @@ def test_returns_none_when_no_detection_qualifies() -> None:
     detections: Dict[int, List[Dict[str, Any]]] = {
         f: [_det(800.0, 300.0 + f * 60.0)] for f in range(6)
     }
-    assert find_flight_release(detections, _markers(500.0)) is None
+    assert find_release_flight(detections, _markers(500.0)) is None
 
 
 def test_returns_none_on_short_track_or_bad_markers() -> None:
     short = {0: [_det(800.0, 400.0)], 1: [_det(810.0, 405.0)], 2: [_det(820.0, 410.0)]}
-    assert find_flight_release(short, _markers(500.0)) is None
+    assert find_release_flight(short, _markers(500.0)) is None
     valid = {f: [_det(800.0 + f * 5.0, 400.0)] for f in range(5)}
-    assert find_flight_release(valid, {"bowl_L": (700.0, 950.0), "bowl_R": (700.0, 950.0)}) is None
-    assert find_flight_release(valid, {"bowl_L": (700.0, 950.0)}) is None
+    assert find_release_flight(valid, {"bowl_L": (700.0, 950.0), "bowl_R": (700.0, 950.0)}) is None
+    assert find_release_flight(valid, {"bowl_L": (700.0, 950.0)}) is None

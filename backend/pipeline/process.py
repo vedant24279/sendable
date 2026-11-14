@@ -57,7 +57,7 @@ from .errors import (
     NoBallDetectedError,
     PipelineCancelled,
 )
-from .release_flight import find_flight_release
+from .release_flight import find_release_flight
 from .shadow_filter import reject_ball_shadows_legacy
 from .zones_classify import classify_bounce
 
@@ -807,7 +807,7 @@ def process_video(
         os.environ.get("TRACKER_RELEASE_MODE", "").strip().lower() == "flight"
     )
     if _flight_mode and have_release:
-        _flight_rel = find_flight_release(detections_by_frame, markers)
+        _flight_rel = find_release_flight(detections_by_frame, markers)
         if _flight_rel is not None:
             _rf, _rx, _ry = _flight_rel
             release.release_frame = int(_rf)

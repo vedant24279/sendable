@@ -17,6 +17,9 @@ from typing import Any, Mapping, Optional, Sequence, Tuple
 FLIGHT_RUN_K: int = 3
 FLIGHT_RUN_T: float = 0.070
 
+K: int = FLIGHT_RUN_K
+T: float = FLIGHT_RUN_T
+
 
 @dataclass(frozen=True)
 class _TrackPoint:
@@ -26,32 +29,58 @@ class _TrackPoint:
     conf: float
 
 
-def _crease_width_px(markers: Mapping[str, Sequence[float]]) -> Optional[float]:
-    bowl_l = markers.get("bowl_L")
-    bowl_r = markers.get("bowl_R")
-    if bowl_l is None or bowl_r is None or len(bowl_l) < 2 or len(bowl_r) < 2:
+def _marker_x(marker: Any) -> Optional[float]:
+    if marker is None:
         return None
-    width = float(bowl_r[0]) - float(bowl_l[0])
+    if isinstance(marker, Mapping):
+        if "x" in marker and marker["x"] is not None:
+            return float(marker["x"])
+        return None
+    if isinstance(marker, Sequence) and len(marker) >= 2:
+        return float(marker[0])
+    return None
+
+
+def _crease_width_px(markers: Optional[Mapping[str, Any]]) -> Optional[float]:
+    if not markers:
+        return None
+    bowl_l_x = _marker_x(markers.get("bowl_L"))
+    bowl_r_x = _marker_x(markers.get("bowl_R"))
+    if bowl_l_x is None or bowl_r_x is None:
+        return None
+    width = bowl_r_x - bowl_l_x
     return width if width > 0.0 else None
 
 
-def _build_track(detections_by_frame: Mapping[int, Sequence[Mapping[str, Any]]]) -> list[_TrackPoint]:
-    track: list[_TrackPoint] = []
-    for frame in sorted(detections_by_frame):
-        balls = [
-            d for d in detections_by_frame[frame]
-            if d.get("class_name") == "ball"
-        ]
-        if not balls:
+def _extract_candidates(
+    dets: Sequence[Mapping[str, Any]],
+) -> list[Tuple[float, float, float]]:
+    candidates: list[Tuple[float, float, float]] = []
+    for d in dets:
+        cls_name = d.get("class_name")
+        if cls_name is not None and cls_name != "ball":
             continue
-        candidates = [
-            (
-                0.5 * (float(d["x1"]) + float(d["x2"])),
-                0.5 * (float(d["y1"]) + float(d["y2"])),
-                float(d.get("conf", 0.0)),
-            )
-            for d in balls
-        ]
+        if "cx" in d and "cy" in d:
+            cx = float(d["cx"])
+            cy = float(d["cy"])
+        elif "x1" in d and "y1" in d and "x2" in d and "y2" in d:
+            cx = 0.5 * (float(d["x1"]) + float(d["x2"]))
+            cy = 0.5 * (float(d["y1"]) + float(d["y2"]))
+        else:
+            continue
+        conf = float(d.get("conf", 0.0))
+        candidates.append((cx, cy, conf))
+    return candidates
+
+
+def _build_track(
+    ball_by_frame: Mapping[int, Sequence[Mapping[str, Any]]],
+) -> list[_TrackPoint]:
+    track: list[_TrackPoint] = []
+    for frame in sorted(ball_by_frame):
+        candidates = _extract_candidates(ball_by_frame[frame])
+        if not candidates:
+            continue
         if not track:
             cx, cy, conf = max(candidates, key=lambda c: c[2])
         else:
@@ -64,16 +93,16 @@ def _build_track(detections_by_frame: Mapping[int, Sequence[Mapping[str, Any]]])
     return track
 
 
-def find_flight_release(
-    detections_by_frame: Mapping[int, Sequence[Mapping[str, Any]]],
-    markers: Mapping[str, Sequence[float]],
+def find_release_flight(
+    ball_by_frame: Mapping[int, Sequence[Mapping[str, Any]]],
+    markers: Optional[Mapping[str, Any]],
     *,
     k: int = FLIGHT_RUN_K,
     t: float = FLIGHT_RUN_T,
 ) -> Optional[Tuple[int, int, int]]:
     """Return ``(frame, x, y)`` for the first flight-run release, or ``None``.
 
-    Normalises every step distance by ``bowl_R[0] - bowl_L[0]``. When no
+    Normalises every step distance by ``bowl_R.x - bowl_L.x``. When no
     detection satisfies the incoming + ``k`` outgoing step threshold ``t``,
     returns ``None`` so the caller retains the streaming release.
     """
@@ -83,7 +112,7 @@ def find_flight_release(
     if crease_w is None:
         return None
 
-    track = _build_track(detections_by_frame)
+    track = _build_track(ball_by_frame)
     if len(track) < k + 1:
         return None
 
@@ -97,3 +126,6 @@ def find_flight_release(
             pt = track[i]
             return int(pt.frame), int(pt.x), int(pt.y)
     return None
+
+
+find_flight_release = find_release_flight
