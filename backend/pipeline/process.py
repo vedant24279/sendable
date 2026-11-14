@@ -57,6 +57,7 @@ from .errors import (
     NoBallDetectedError,
     PipelineCancelled,
 )
+from .release_flight import find_flight_release
 from .shadow_filter import reject_ball_shadows_legacy
 from .zones_classify import classify_bounce
 
@@ -802,6 +803,18 @@ def process_video(
         except Exception as _dbg_exc:
             print(f"[WARN] TRACKER_DEBUG_DUMP failed: {_dbg_exc}")
 
+    _flight_mode = (
+        os.environ.get("TRACKER_RELEASE_MODE", "").strip().lower() == "flight"
+    )
+    if _flight_mode and have_release:
+        _flight_rel = find_flight_release(detections_by_frame, markers)
+        if _flight_rel is not None:
+            _rf, _rx, _ry = _flight_rel
+            release.release_frame = int(_rf)
+            release.x = int(_rx)
+            release.y = int(_ry)
+            release_f = int(_rf)
+
     # Prefer the earliest cluster of valid ball detections as release.
     # The streaming ReleaseDetector picks the first 3-frame streak whose
     # speed ratio stays within 0.5×–2× — that gate is conservative and on
@@ -811,7 +824,7 @@ def process_video(
     # within an 8-frame window, all above the bowler-end stump top, with
     # ≥40 px total displacement so a static blob doesn't qualify) and
     # override the lock to that cluster's first frame.
-    if have_release:
+    if have_release and not _flight_mode:
         _stump_top = (
             markers["bowl_stump"][1]
             - _STUMP_HEIGHT_M
@@ -1097,6 +1110,8 @@ def process_video(
     trajectory_points = []
     seen_real = set()
     for (ff, x, y) in trajectory._pts:
+        if _flight_mode and have_release and ff < release_f:
+            continue
         if ff in seen_real:
             continue
         seen_real.add(ff)
