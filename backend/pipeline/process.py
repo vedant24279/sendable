@@ -71,6 +71,267 @@ _REJECT_SHADOWS = os.environ.get("TRACKER_REJECT_SHADOWS", "1").strip() not in (
     "0", "false", "False", "FALSE", "no", "NO", ""
 )
 
+SPEED_B: float = 0.35
+
+
+def map_seg_b_frame(
+    f: int, seg_b_start: int, fps: float, speed_b: float = SPEED_B
+) -> tuple[int, int, float]:
+    """Single source of truth for Segment B time mapping at `SPEED_B` (0.35x).
+
+    For source frame `f` within Segment B (`k = f - seg_b_start`):
+      - `out_start = round(k / speed_b)` (output frame index of source frame `f`)
+      - `out_end = round((k + 1) / speed_b)`
+      - `repeats = out_end - out_start` (number of output frames written for `f`)
+      - `out_sec = out_start / fps` (output timestamp in seconds of source frame `f`)
+    """
+    k = int(f) - int(seg_b_start)
+    out_start = int(round(k / speed_b))
+    out_end = int(round((k + 1) / speed_b))
+    repeats = out_end - out_start
+    out_sec = out_start / float(fps)
+    return out_start, repeats, out_sec
+
+
+def compute_seg_b_window_v2(
+    total: int,
+    release_f: Optional[int],
+    bounce_f: Optional[int],
+    impact_f: Optional[int],
+    dev_f: Optional[int],
+    trajectory_post: Optional[list[dict]] = None,
+) -> tuple[int, int, Optional[int]]:
+    """Compute `(seg_b_start, seg_b_end, contact_f)` for render mode v2."""
+    seg_b_start = max(0, int(release_f) - 5) if release_f is not None else 0
+    contact_f = (
+        int(impact_f)
+        if impact_f is not None
+        else (int(dev_f) if dev_f is not None else None)
+    )
+    if trajectory_post:
+        seg_b_end = min(int(trajectory_post[-1]["frame"]), total - 1)
+    elif contact_f is not None:
+        seg_b_end = min(contact_f + 5, total - 1)
+    elif bounce_f is not None:
+        seg_b_end = min(int(bounce_f) + 30, total - 1)
+    else:
+        seg_b_end = min(seg_b_start + 45, total - 1)
+    return seg_b_start, seg_b_end, contact_f
+
+
+def build_segments_v2(
+    total: int,
+    fps: float,
+    release_f: Optional[int],
+    bounce_f: Optional[int],
+    impact_f: Optional[int],
+    dev_f: Optional[int],
+    trajectory_post: Optional[list[dict]] = None,
+    seg_b_frames_written: Optional[int] = None,
+) -> dict:
+    """Build the `results.json` `segments` dict for `TRACKER_RENDER_MODE=v2`."""
+    seg_b_start, seg_b_end, contact_f = compute_seg_b_window_v2(
+        total=total,
+        release_f=release_f,
+        bounce_f=bounce_f,
+        impact_f=impact_f,
+        dev_f=dev_f,
+        trajectory_post=trajectory_post,
+    )
+    post_last_f = (
+        int(trajectory_post[-1]["frame"]) if trajectory_post else None
+    )
+
+    if seg_b_frames_written is not None:
+        seg_b_end_sec = float(seg_b_frames_written) / float(fps)
+    else:
+        seg_b_end_sec = map_seg_b_frame(seg_b_end + 1, seg_b_start, fps)[2]
+
+    def _b_sec(f_idx: Optional[int]) -> Optional[float]:
+        if f_idx is None:
+            return None
+        return round(map_seg_b_frame(int(f_idx), seg_b_start, fps)[2], 4)
+
+    seg_b_release_sec = _b_sec(release_f)
+    seg_b_bounce_sec = _b_sec(bounce_f)
+    seg_b_impact_sec = _b_sec(impact_f)
+    seg_b_deviation_sec = _b_sec(contact_f)
+    seg_b_post_end_sec = _b_sec(post_last_f)
+
+    if release_f is not None and bounce_f is not None:
+        rb_anim = 2.0 * (int(bounce_f) - int(release_f)) / float(fps)
+        bi_anim = (
+            2.0 * (int(contact_f) - int(bounce_f)) / float(fps)
+            if contact_f is not None
+            else 0.0
+        )
+        post_anim = (
+            2.0 * (int(post_last_f) - int(contact_f)) / float(fps)
+            if (post_last_f is not None and contact_f is not None)
+            else 0.0
+        )
+        seg_c_start_sec = round(seg_b_end_sec, 4)
+        seg_c_rb_end_sec = round(seg_b_end_sec + rb_anim, 4)
+        seg_c_bi_end_sec = round(seg_b_end_sec + rb_anim + bi_anim, 4)
+        seg_c_bd_end_sec = seg_c_bi_end_sec
+        seg_c_post_end_sec = (
+            round(seg_b_end_sec + rb_anim + bi_anim + post_anim, 4)
+            if post_last_f is not None
+            else None
+        )
+        seg_c_end_sec = round(
+            seg_b_end_sec + rb_anim + bi_anim + post_anim + 1.0, 4
+        )
+    else:
+        seg_c_start_sec = None
+        seg_c_rb_end_sec = None
+        seg_c_bi_end_sec = None
+        seg_c_bd_end_sec = None
+        seg_c_post_end_sec = None
+        seg_c_end_sec = None
+
+    return {
+        "render_mode": "v2",
+        "seg_a_start_sec": 0.0,
+        "seg_a_end_sec": 0.0,
+        "seg_a_release_sec": None,
+        "seg_a_bounce_sec": None,
+        "seg_a_deviation_sec": None,
+        "seg_b_start_sec": 0.0,
+        "seg_b_end_sec": round(seg_b_end_sec, 4),
+        "seg_b_release_sec": seg_b_release_sec,
+        "seg_b_bounce_sec": seg_b_bounce_sec,
+        "seg_b_impact_sec": seg_b_impact_sec,
+        "seg_b_deviation_sec": seg_b_deviation_sec,
+        "seg_b_post_end_sec": seg_b_post_end_sec,
+        "speed_b": SPEED_B,
+        "seg_c_start_sec": seg_c_start_sec,
+        "seg_c_rb_end_sec": seg_c_rb_end_sec,
+        "seg_c_bi_end_sec": seg_c_bi_end_sec,
+        "seg_c_bd_end_sec": seg_c_bd_end_sec,
+        "seg_c_post_end_sec": seg_c_post_end_sec,
+        "seg_c_end_sec": seg_c_end_sec,
+    }
+
+
+def build_segments(
+    total: int,
+    fps: float,
+    release_f: Optional[int],
+    bounce_f: Optional[int],
+    impact_f: Optional[int],
+    dev_f: Optional[int],
+    trajectory_post: Optional[list[dict]] = None,
+    *,
+    render_mode: Optional[str] = None,
+    seg_a_frames_written: Optional[int] = None,
+    seg_b_frames_written: Optional[int] = None,
+) -> dict:
+    """Build the `results.json` `segments` dictionary for legacy or v2 mode."""
+    mode = (
+        render_mode
+        if render_mode is not None
+        else os.environ.get("TRACKER_RENDER_MODE", "")
+    ).strip().lower()
+    if mode == "v2":
+        return build_segments_v2(
+            total=total,
+            fps=fps,
+            release_f=release_f,
+            bounce_f=bounce_f,
+            impact_f=impact_f,
+            dev_f=dev_f,
+            trajectory_post=trajectory_post,
+            seg_b_frames_written=seg_b_frames_written,
+        )
+
+    have_release = release_f is not None
+    have_bounce = bounce_f is not None
+    have_dev = dev_f is not None
+
+    seg_a_start_frame = max(0, int(release_f) - 30) if have_release else 0
+    seg_a_end = (
+        min(int(dev_f) + 30, total - 1)
+        if have_dev
+        else (
+            min(int(bounce_f) + 30, total - 1)
+            if have_bounce
+            else total - 1
+        )
+    )
+    if seg_a_frames_written is None:
+        seg_a_frames_written = max(0, seg_a_end - seg_a_start_frame + 1)
+
+    if seg_b_frames_written is None:
+        if have_release and have_bounce:
+            seg_b_start = max(0, int(release_f) - 5)
+            seg_b_end = (
+                min(int(dev_f) + 5, total - 1) if have_dev else seg_a_end
+            )
+            seg_b_frames_written = 2 * max(0, seg_b_end - seg_b_start + 1)
+        else:
+            seg_b_frames_written = 0
+
+    seg_a_end_sec = seg_a_frames_written / fps
+    seg_b_end_sec = seg_a_end_sec + seg_b_frames_written / fps
+
+    seg_a_lead_in_frames = (
+        int(release_f) - seg_a_start_frame if have_release else 0
+    )
+    seg_a_release_sec = (
+        round(seg_a_lead_in_frames / fps, 4) if have_release else None
+    )
+    seg_a_bounce_sec = (
+        round((seg_a_lead_in_frames + (int(bounce_f) - int(release_f))) / fps, 4)
+        if have_release and have_bounce
+        else None
+    )
+    seg_a_deviation_sec = (
+        round((seg_a_lead_in_frames + (int(dev_f) - int(release_f))) / fps, 4)
+        if have_release and have_dev
+        else None
+    )
+
+    if have_release and have_bounce:
+        seg_b_release_sec = round(seg_a_end_sec + 5 * 2 / fps, 4)
+        seg_b_bounce_sec = round(
+            seg_a_end_sec + (int(bounce_f) - int(release_f) + 5) * 2 / fps, 4
+        )
+        seg_b_deviation_sec = (
+            round(seg_a_end_sec + (int(dev_f) - int(release_f) + 5) * 2 / fps, 4)
+            if have_dev
+            else None
+        )
+    else:
+        seg_b_release_sec = seg_b_bounce_sec = seg_b_deviation_sec = None
+
+    if have_release and have_bounce and have_dev:
+        rb_anim = 2.0 * (int(bounce_f) - int(release_f)) / fps
+        bd_anim = 2.0 * (int(dev_f) - int(bounce_f)) / fps
+        seg_c_start_sec = round(seg_b_end_sec, 4)
+        seg_c_rb_end_sec = round(seg_b_end_sec + rb_anim, 4)
+        seg_c_bd_end_sec = round(seg_b_end_sec + rb_anim + bd_anim, 4)
+        seg_c_end_sec = round(seg_b_end_sec + rb_anim + bd_anim + 1.0, 4)
+    else:
+        seg_c_start_sec = seg_c_rb_end_sec = seg_c_bd_end_sec = seg_c_end_sec = None
+
+    return {
+        "seg_a_start_sec": 0.0,
+        "seg_a_end_sec": round(seg_a_end_sec, 4),
+        "seg_a_release_sec": seg_a_release_sec,
+        "seg_a_bounce_sec": seg_a_bounce_sec,
+        "seg_a_deviation_sec": seg_a_deviation_sec,
+        "seg_b_start_sec": round(seg_a_end_sec, 4),
+        "seg_b_end_sec": round(seg_b_end_sec, 4),
+        "seg_b_release_sec": seg_b_release_sec,
+        "seg_b_bounce_sec": seg_b_bounce_sec,
+        "seg_b_deviation_sec": seg_b_deviation_sec,
+        "seg_c_start_sec": seg_c_start_sec,
+        "seg_c_rb_end_sec": seg_c_rb_end_sec,
+        "seg_c_bd_end_sec": seg_c_bd_end_sec,
+        "seg_c_end_sec": seg_c_end_sec,
+    }
+
 
 def get_session(weights_path: Path):
     """ONNX session from an explicit weights path (legacy load_model reads
@@ -477,6 +738,37 @@ def _run_segment_c(
     del release_pt, bounce_pt, deviation_pt, rel_to_bounce_pts
     del rel_to_bounce_frame_range
     anim_sec = 2.0 * rel_to_dev_frames / fps
+    hold_sec = 1.0
+    n_total = max(8, int(round(fps * (anim_sec + hold_sec))))
+    for _ in range(n_total):
+        out_writer.write(base.copy())
+
+
+def _run_segment_c_v2(
+    out_writer,
+    video_path,
+    fps,
+    freeze_frame: int,
+    release_f: int,
+    post_end_f: int,
+    markers: dict,
+):
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return
+    cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(freeze_frame)))
+    ret, frozen = cap.read()
+    cap.release()
+    if not ret:
+        return
+
+    base = frozen.copy()
+    H_world = build_homography(markers) if markers else None
+    if H_world is not None:
+        base = draw_zones(base, H_world, alpha=0.30, label=True)
+
+    sweep_frames = max(0, int(post_end_f) - int(release_f))
+    anim_sec = 2.0 * sweep_frames / float(fps)
     hold_sec = 1.0
     n_total = max(8, int(round(fps * (anim_sec + hold_sec))))
     for _ in range(n_total):
@@ -920,6 +1212,19 @@ def process_video(
     trajectory = Trajectory()
     _apply_bat_zone(trajectory)
 
+    _render_v2 = (
+        os.environ.get("TRACKER_RENDER_MODE", "").strip().lower() == "v2"
+    )
+    impact_f = (
+        int(_vertex_impact["frame"])
+        if _vertex_impact is not None
+        else (
+            int(impact_detector.impact.frame)
+            if impact_detector.impact is not None
+            else None
+        )
+    )
+
     seg_a_end = (
         min(dev_f + 30, total - 1) if have_dev
         else (min(bounce_f + 30, total - 1) if have_bounce
@@ -952,7 +1257,7 @@ def process_video(
         trajectory.update(dets, fnum, release_frame=rel_f, bounce_frame=bf_now)
         _refine_release(release_detector, bounce_detector, trajectory)
         csv_logger.log(fnum, dets, grid_corners=grid_corners)
-        if fnum < seg_a_start_frame:
+        if _render_v2 or fnum < seg_a_start_frame:
             continue  # CSV logged, but skip writing this frame to SEG A.
         frame = _draw_progressive_overlays(
             frame, fnum, dets,
@@ -962,9 +1267,35 @@ def process_video(
         out_writer.write(frame)
         seg_a_frames_written += 1
 
-    # ─── PASS 3: SEG B (only when release + bounce both confirmed) ───────────
+    # ─── PASS 3: SEG B ───────────────────────────────────────────────────────
     seg_b_frames_written = 0
-    if have_release and have_bounce:
+    if _render_v2:
+        if have_release and have_bounce:
+            _legacy_seg_b_end = (
+                min(dev_f + 5, total - 1) if have_dev else seg_a_end
+            )
+            trajectory._pts = [
+                p for p in trajectory._pts if p[0] <= _legacy_seg_b_end
+            ]
+        seg_b_start, seg_b_end, contact_f = compute_seg_b_window_v2(
+            total=total,
+            release_f=release_f if have_release else None,
+            bounce_f=bounce_f if have_bounce else None,
+            impact_f=impact_f,
+            dev_f=dev_f if have_dev else None,
+            trajectory_post=trajectory_post_points,
+        )
+        cap.set(cv2.CAP_PROP_POS_FRAMES, seg_b_start)
+        for fnum in range(seg_b_start, seg_b_end + 1):
+            _check_cancel()
+            ret, frame = cap.read()
+            if not ret:
+                break
+            _, n_copies, _ = map_seg_b_frame(fnum, seg_b_start, fps)
+            for _ in range(n_copies):
+                out_writer.write(frame)
+                seg_b_frames_written += 1
+    elif have_release and have_bounce:
         seg_b_start = max(0, release_f - 5)
         seg_b_end = min(dev_f + 5, total - 1) if have_dev else seg_a_end
         full_traj_pts = [p for p in trajectory._pts if p[0] <= seg_b_end]
@@ -1015,7 +1346,24 @@ def process_video(
     cap.release()
 
     # ─── PASS 4: SEG C (frozen frame zones + parabolas) ──────────────────────
-    if have_release and have_bounce and have_dev:
+    if _render_v2:
+        if have_release and have_bounce:
+            freeze_f = contact_f if contact_f is not None else seg_b_end
+            post_end_f = (
+                int(trajectory_post_points[-1]["frame"])
+                if trajectory_post_points
+                else (contact_f if contact_f is not None else bounce_f)
+            )
+            _run_segment_c_v2(
+                out_writer,
+                video_path,
+                fps,
+                freeze_frame=freeze_f,
+                release_f=release_f,
+                post_end_f=post_end_f,
+                markers={k: list(v) for k, v in markers.items()},
+            )
+    elif have_release and have_bounce and have_dev:
         release_pt = (release.x, release.y)
         bounce_pt = (bounce[1], bounce[2])
         deviation_pt = (dev_changes[0][1], dev_changes[0][2])
@@ -1038,64 +1386,76 @@ def process_video(
     # the frontend SVG overlay can drive marker reveal in SEG A, parabola
     # sweep + traveling ball in SEG B, and the 0.5×-then-hold animation in
     # SEG C — each off a single `currentTime` value.
-    seg_a_end_sec = seg_a_frames_written / fps
-    seg_b_end_sec = seg_a_end_sec + seg_b_frames_written / fps
-
-    # SEG A: starts 30 frames before release (or at frame 0 if release_f < 30).
-    # Release shows up at output time (release_f - seg_a_start_frame) / fps;
-    # bounce/deviation offset further by their source-frame distance.
-    seg_a_lead_in_frames = release_f - seg_a_start_frame if have_release else 0
-    seg_a_release_sec = (
-        round(seg_a_lead_in_frames / fps, 4) if have_release else None
-    )
-    seg_a_bounce_sec = (
-        round((seg_a_lead_in_frames + (bounce_f - release_f)) / fps, 4)
-        if have_release and have_bounce else None
-    )
-    seg_a_deviation_sec = (
-        round((seg_a_lead_in_frames + (dev_f - release_f)) / fps, 4)
-        if have_release and have_dev else None
-    )
-
-    # SEG B: 0.5× replay starting at release_f - 5. Each input frame writes 2
-    # output frames at fps, so input-frame offset N maps to N*2/fps output sec.
-    if have_release and have_bounce:
-        seg_b_release_sec   = round(seg_a_end_sec + 5 * 2 / fps, 4)
-        seg_b_bounce_sec    = round(seg_a_end_sec + (bounce_f - release_f + 5) * 2 / fps, 4)
-        seg_b_deviation_sec = (
-            round(seg_a_end_sec + (dev_f - release_f + 5) * 2 / fps, 4)
-            if have_dev else None
+    if _render_v2:
+        segments_obj = build_segments_v2(
+            total=total,
+            fps=fps,
+            release_f=release_f if have_release else None,
+            bounce_f=bounce_f if have_bounce else None,
+            impact_f=impact_f,
+            dev_f=dev_f if have_dev else None,
+            trajectory_post=trajectory_post_points,
+            seg_b_frames_written=seg_b_frames_written,
         )
     else:
-        seg_b_release_sec = seg_b_bounce_sec = seg_b_deviation_sec = None
+        seg_a_end_sec = seg_a_frames_written / fps
+        seg_b_end_sec = seg_a_end_sec + seg_b_frames_written / fps
 
-    # SEG C: 0.5× anim (rb sweep, then bd sweep), then 1 s hold.
-    if have_release and have_bounce and have_dev:
-        rb_anim = 2.0 * (bounce_f - release_f) / fps
-        bd_anim = 2.0 * (dev_f - bounce_f) / fps
-        seg_c_start_sec  = round(seg_b_end_sec, 4)
-        seg_c_rb_end_sec = round(seg_b_end_sec + rb_anim, 4)
-        seg_c_bd_end_sec = round(seg_b_end_sec + rb_anim + bd_anim, 4)
-        seg_c_end_sec    = round(seg_b_end_sec + rb_anim + bd_anim + 1.0, 4)
-    else:
-        seg_c_start_sec = seg_c_rb_end_sec = seg_c_bd_end_sec = seg_c_end_sec = None
+        # SEG A: starts 30 frames before release (or at frame 0 if release_f < 30).
+        # Release shows up at output time (release_f - seg_a_start_frame) / fps;
+        # bounce/deviation offset further by their source-frame distance.
+        seg_a_lead_in_frames = release_f - seg_a_start_frame if have_release else 0
+        seg_a_release_sec = (
+            round(seg_a_lead_in_frames / fps, 4) if have_release else None
+        )
+        seg_a_bounce_sec = (
+            round((seg_a_lead_in_frames + (bounce_f - release_f)) / fps, 4)
+            if have_release and have_bounce else None
+        )
+        seg_a_deviation_sec = (
+            round((seg_a_lead_in_frames + (dev_f - release_f)) / fps, 4)
+            if have_release and have_dev else None
+        )
 
-    segments_obj = {
-        "seg_a_start_sec":     0.0,
-        "seg_a_end_sec":       round(seg_a_end_sec, 4),
-        "seg_a_release_sec":   seg_a_release_sec,
-        "seg_a_bounce_sec":    seg_a_bounce_sec,
-        "seg_a_deviation_sec": seg_a_deviation_sec,
-        "seg_b_start_sec":     round(seg_a_end_sec, 4),
-        "seg_b_end_sec":       round(seg_b_end_sec, 4),
-        "seg_b_release_sec":   seg_b_release_sec,
-        "seg_b_bounce_sec":    seg_b_bounce_sec,
-        "seg_b_deviation_sec": seg_b_deviation_sec,
-        "seg_c_start_sec":     seg_c_start_sec,
-        "seg_c_rb_end_sec":    seg_c_rb_end_sec,
-        "seg_c_bd_end_sec":    seg_c_bd_end_sec,
-        "seg_c_end_sec":       seg_c_end_sec,
-    }
+        # SEG B: 0.5× replay starting at release_f - 5. Each input frame writes 2
+        # output frames at fps, so input-frame offset N maps to N*2/fps output sec.
+        if have_release and have_bounce:
+            seg_b_release_sec   = round(seg_a_end_sec + 5 * 2 / fps, 4)
+            seg_b_bounce_sec    = round(seg_a_end_sec + (bounce_f - release_f + 5) * 2 / fps, 4)
+            seg_b_deviation_sec = (
+                round(seg_a_end_sec + (dev_f - release_f + 5) * 2 / fps, 4)
+                if have_dev else None
+            )
+        else:
+            seg_b_release_sec = seg_b_bounce_sec = seg_b_deviation_sec = None
+
+        # SEG C: 0.5× anim (rb sweep, then bd sweep), then 1 s hold.
+        if have_release and have_bounce and have_dev:
+            rb_anim = 2.0 * (bounce_f - release_f) / fps
+            bd_anim = 2.0 * (dev_f - bounce_f) / fps
+            seg_c_start_sec  = round(seg_b_end_sec, 4)
+            seg_c_rb_end_sec = round(seg_b_end_sec + rb_anim, 4)
+            seg_c_bd_end_sec = round(seg_b_end_sec + rb_anim + bd_anim, 4)
+            seg_c_end_sec    = round(seg_b_end_sec + rb_anim + bd_anim + 1.0, 4)
+        else:
+            seg_c_start_sec = seg_c_rb_end_sec = seg_c_bd_end_sec = seg_c_end_sec = None
+
+        segments_obj = {
+            "seg_a_start_sec":     0.0,
+            "seg_a_end_sec":       round(seg_a_end_sec, 4),
+            "seg_a_release_sec":   seg_a_release_sec,
+            "seg_a_bounce_sec":    seg_a_bounce_sec,
+            "seg_a_deviation_sec": seg_a_deviation_sec,
+            "seg_b_start_sec":     round(seg_a_end_sec, 4),
+            "seg_b_end_sec":       round(seg_b_end_sec, 4),
+            "seg_b_release_sec":   seg_b_release_sec,
+            "seg_b_bounce_sec":    seg_b_bounce_sec,
+            "seg_b_deviation_sec": seg_b_deviation_sec,
+            "seg_c_start_sec":     seg_c_start_sec,
+            "seg_c_rb_end_sec":    seg_c_rb_end_sec,
+            "seg_c_bd_end_sec":    seg_c_bd_end_sec,
+            "seg_c_end_sec":       seg_c_end_sec,
+        }
 
     out_writer.release()
     csv_logger.close()
