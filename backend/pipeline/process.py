@@ -58,6 +58,7 @@ from .errors import (
     PipelineCancelled,
 )
 from .impact_vertex import find_impact_vertex, find_post_impact_points
+from .lbw_line import lbw_block
 from .release_flight import find_release_flight
 from .shadow_filter import reject_ball_shadows_legacy
 from . import zone_scale
@@ -1616,6 +1617,12 @@ def process_video(
         },
         "warnings": [encoding_warning] if encoding_warning else [],
     }
+
+    # Line-only LBW prediction: active only when TRACKER_LBW_MODE == "line"
+    # (batter hand from TRACKER_BATTER_HAND). Additive; the key is absent otherwise.
+    _lbw = lbw_block(results, os.environ)
+    if _lbw is not None:
+        results["lbw"] = _lbw
 
     with open(output_dir / "results.json", "w") as f_out:
         json.dump(results, f_out, indent=2, sort_keys=True)
