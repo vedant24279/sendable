@@ -74,6 +74,40 @@ _REJECT_SHADOWS = os.environ.get("TRACKER_REJECT_SHADOWS", "1").strip() not in (
 )
 
 SPEED_B: float = 0.35
+BOUNCE_SANITY_MIN_OFFSET: int = 6
+
+
+def apply_bounce_sanity(
+    detections_by_frame: dict[int, list],
+    release_f: Optional[int],
+    bounce: Optional[tuple[int, int, int]],
+    *,
+    min_offset: int = BOUNCE_SANITY_MIN_OFFSET,
+    bounce_detector_cls=BounceDetector,
+) -> Optional[tuple[int, int, int]]:
+    """Discard a streaming bounce earlier than ``release_f + min_offset``.
+
+    When triggered, re-runs ``BounceDetector`` restricted to frames
+    ``>= release_f + min_offset`` to locate the next valid bounce candidate,
+    or returns ``None`` if none exists.
+    """
+    if bounce is None or release_f is None:
+        return bounce
+    min_frame = int(release_f) + int(min_offset)
+    if int(bounce[0]) >= min_frame:
+        return bounce
+    bd = bounce_detector_cls()
+    for fnum in sorted(detections_by_frame):
+        if int(fnum) < min_frame:
+            continue
+        bd.update(
+            detections_by_frame[fnum],
+            int(fnum),
+            release_frame=int(release_f),
+        )
+        if bd.bounce_point is not None:
+            return bd.bounce_point
+    return None
 
 
 def map_seg_b_frame(
@@ -1114,18 +1148,6 @@ def process_video(
             release.y = int(_ry)
             release_f = int(_rf)
 
-    _impact_mode = (
-        os.environ.get("TRACKER_IMPACT_MODE", "").strip().lower() == "vertex"
-    )
-    _vertex_impact = None
-    trajectory_post_points: list[dict] = []
-    if _impact_mode and have_bounce:
-        _vertex_impact = find_impact_vertex(detections_by_frame, markers, bounce_f)
-        if _vertex_impact is not None:
-            trajectory_post_points = find_post_impact_points(
-                detections_by_frame, markers, _vertex_impact["frame"]
-            )
-
     # Prefer the earliest cluster of valid ball detections as release.
     # The streaming ReleaseDetector picks the first 3-frame streak whose
     # speed ratio stays within 0.5×–2× — that gate is conservative and on
@@ -1179,6 +1201,26 @@ def process_video(
                 f"span {span:.0f}px"
             )
             break
+
+    _bounce_sanity_mode = (
+        os.environ.get("TRACKER_BOUNCE_SANITY", "").strip() == "1"
+    )
+    if _bounce_sanity_mode and have_release and have_bounce:
+        bounce = apply_bounce_sanity(detections_by_frame, release_f, bounce)
+        have_bounce = bounce is not None
+        bounce_f = bounce[0] if have_bounce else None
+
+    _impact_mode = (
+        os.environ.get("TRACKER_IMPACT_MODE", "").strip().lower() == "vertex"
+    )
+    _vertex_impact = None
+    trajectory_post_points: list[dict] = []
+    if _impact_mode and have_bounce:
+        _vertex_impact = find_impact_vertex(detections_by_frame, markers, bounce_f)
+        if _vertex_impact is not None:
+            trajectory_post_points = find_post_impact_points(
+                detections_by_frame, markers, _vertex_impact["frame"]
+            )
 
     # Strip pre-release ball detections that can't belong to the delivery.
     # The static-spot suppressor in filters.py needs >4 consecutive frames in
