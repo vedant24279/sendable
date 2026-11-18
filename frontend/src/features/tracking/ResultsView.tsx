@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { TrackingResult, ZONE_COLORS } from "./types";
 import { PitchOverlay } from "./PitchOverlay";
 import { isRenderV2 } from "./renderTimeline";
+import { ACCURACY_NOTE, hasLbwGraphic, lbwColor, verdictText } from "./lbwDisplay";
+import { PitchMapInset } from "./PitchMapInset";
 import { PlayerMarker, VideoPlayer, VideoPlayerHandle } from "./VideoPlayer";
 import { FeedbackModal } from "./FeedbackModal";
 import { getFeedback } from "./api";
@@ -19,11 +21,16 @@ export function ResultsView({ result }: { result: TrackingResult }) {
   const [showBallMarkers, setShowBallMarkers] = useState(true);
   const [showParabola, setShowParabola] = useState(true);
   const [showPrediction, setShowPrediction] = useState(() => !isV2);
+  const hasLbw = hasLbwGraphic(result);
+  const [showLbw, setShowLbw] = useState(hasLbw);
   const [currentTime, setCurrentTime] = useState(0);
 
   useEffect(() => {
     setShowPrediction(!isV2);
   }, [isV2, result.job_id]);
+  useEffect(() => {
+    setShowLbw(hasLbw);
+  }, [hasLbw, result.job_id]);
   const [downloading, setDownloading] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackInitial, setFeedbackInitial] = useState<DeliveryFeedback | null>(null);
@@ -180,11 +187,19 @@ export function ResultsView({ result }: { result: TrackingResult }) {
             on={showParabola}
             onClick={() => setShowParabola((v) => !v)}
           />
-          <ToggleButton
-            label={isV2 ? "Predicted path (experimental)" : "Predicted path"}
-            on={showPrediction}
-            onClick={() => setShowPrediction((v) => !v)}
-          />
+          {hasLbw ? (
+            <ToggleButton
+              label="LBW (line only)"
+              on={showLbw}
+              onClick={() => setShowLbw((v) => !v)}
+            />
+          ) : (
+            <ToggleButton
+              label={isV2 ? "Predicted path (experimental)" : "Predicted path"}
+              on={showPrediction}
+              onClick={() => setShowPrediction((v) => !v)}
+            />
+          )}
         </div>
         <VideoPlayer
           ref={playerRef}
@@ -202,12 +217,20 @@ export function ResultsView({ result }: { result: TrackingResult }) {
               showBallMarkers={showBallMarkers}
               showParabola={showParabola}
               showPrediction={showPrediction}
+              showLbw={showLbw}
               currentTime={currentTime}
               ballType={result.ball_type}
             />
           }
         />
       </div>
+
+      {hasLbw && (
+        <div className="panel">
+          <h3 style={{ marginTop: 0 }}>Pitch map (line only)</h3>
+          <PitchMapInset lbw={result.lbw} width={140} height={420} />
+        </div>
+      )}
 
       <EventCards result={result} />
 
@@ -352,6 +375,25 @@ function EventCards({ result }: { result: TrackingResult }) {
           )}
         </div>
       )}
+      {hasLbwGraphic(result) && <LbwBadge result={result} />}
+    </div>
+  );
+}
+
+function LbwBadge({ result }: { result: TrackingResult }) {
+  const text = verdictText(result.lbw);
+  if (!text || !result.lbw) return null;
+  const color = lbwColor(result.lbw.overall);
+  return (
+    <div className="event-card" style={{ borderColor: color, borderWidth: 2, borderStyle: "solid" }}>
+      <h3>LBW (line only)</h3>
+      <div className="value" style={{ color }}>{text.headline}</div>
+      {text.detail.map((line) => (
+        <div key={line} className="muted">{line}</div>
+      ))}
+      <div className="muted" style={{ marginTop: 8, fontSize: 12, fontStyle: "italic" }}>
+        {ACCURACY_NOTE}
+      </div>
     </div>
   );
 }

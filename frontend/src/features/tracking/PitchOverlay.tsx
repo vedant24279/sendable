@@ -1,4 +1,4 @@
-import { Calibration, TrackingResult } from "./types";
+import { Calibration, LbwPixel, LbwResult, TrackingResult } from "./types";
 import {
   bounceToContactPoints,
   contactEvent,
@@ -9,6 +9,8 @@ import {
   postPoints,
   progress,
 } from "./renderTimeline";
+import { hasLbwGraphic, inSegmentC, lbwColor, visibleAt } from "./lbwDisplay";
+import { PitchMapInset } from "./PitchMapInset";
 
 interface Props {
   result: TrackingResult;
@@ -20,6 +22,8 @@ interface Props {
    *  toward the batter's stumps, showing where the ball would have gone if
    *  the batsman had not made contact. */
   showPrediction: boolean;
+  /** Line-only LBW graphic + pitch-map inset (v2 results with a lbw block only). */
+  showLbw?: boolean;
   /** Current playback time in seconds — markers / parabola animate as it advances. */
   currentTime: number;
   /** Which cricket_ball.png to use ('white' default, 'red' for red-ball jobs). */
@@ -547,9 +551,65 @@ function BallMarkers({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Line-only LBW graphic (v2 + lbw block). Draws ONLY backend-projected pixels
+// (lbw.pixels); no geometry is computed here.
+// ─────────────────────────────────────────────────────────────────────────────
+const LBW_RIBBON_OPACITY = 0.35;
+
+function pts(...ps: LbwPixel[]): string | null {
+  if (ps.some((p) => p == null)) return null;
+  return ps.map((p) => `${p![0]},${p![1]}`).join(" ");
+}
+
+function LbwGraphic({ lbw }: { lbw: LbwResult }) {
+  const px = lbw.pixels;
+  if (!px) return null;
+  const color = lbwColor(lbw.overall);
+
+  const off = px.stump_top_offset_px;
+  const sL = px.stump_base_left, sR = px.stump_base_right;
+  const stumpRect =
+    sL && sR && off != null
+      ? pts(sL, sR, [sR[0], sR[1] - off], [sL[0], sL[1] - off])
+      : null;
+  const ribbon = pts(px.impact_left, px.impact_right, px.wickets_right, px.wickets_left);
+  const ig = px.impact_ground, wc = px.wickets_centre, pp = px.pitching;
+
+  return (
+    <g>
+      {ribbon && (
+        <polygon points={ribbon} fill={color} fillOpacity={LBW_RIBBON_OPACITY} />
+      )}
+      {ig && wc && (
+        <line
+          x1={ig[0]} y1={ig[1]} x2={wc[0]} y2={wc[1]}
+          stroke="#ffffff" strokeWidth={2.5} strokeDasharray="8 6"
+          strokeLinecap="round"
+        />
+      )}
+      {stumpRect && (
+        <polygon points={stumpRect} fill="none" stroke="#ffffff" strokeWidth={2.5} />
+      )}
+      {pp && (
+        <g>
+          <circle cx={pp[0]} cy={pp[1]} r={14} fill="none" stroke={color} strokeWidth={4} />
+          <text
+            x={pp[0] + 20} y={pp[1] + 6}
+            fontSize={22} fontWeight={700} fill="#ffffff"
+            stroke="#000000" strokeWidth={4} paintOrder="stroke"
+          >
+            Pitching
+          </text>
+        </g>
+      )}
+    </g>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 export function PitchOverlay({
   result, showStumps, showPitchingLine, showBallMarkers, showParabola,
-  showPrediction, currentTime, ballType = "white",
+  showPrediction, showLbw = false, currentTime, ballType = "white",
 }: Props) {
   const { width, height } = result.video;
   const cal = result.calibration;
@@ -557,6 +617,13 @@ export function PitchOverlay({
 
   const bowl_w = dist(cal.bowl_L, cal.bowl_R);
   const bat_w  = dist(cal.bat_L,  cal.bat_R);
+  const lbwMode = hasLbwGraphic(result);
+  const lbwOn = lbwMode && showLbw && result.lbw != null;
+  const lbwVisible = lbwOn && visibleAt(currentTime, result.segments);
+  const insetVisible = lbwOn && inSegmentC(currentTime, result.segments);
+  const insetH = Math.round(height * 0.6);
+  const insetW = Math.round(insetH / 3);
+  const insetMargin = Math.round(height * 0.03);
 
   return (
     <svg
@@ -598,8 +665,18 @@ export function PitchOverlay({
       {showBallMarkers && (
         <BallMarkers result={result} currentTime={currentTime} ballType={ballType} />
       )}
-      {showPrediction && (
+      {showPrediction && !lbwMode && (
         <PredictedPath result={result} currentTime={currentTime} />
+      )}
+      {lbwVisible && result.lbw && <LbwGraphic lbw={result.lbw} />}
+      {insetVisible && (
+        <PitchMapInset
+          lbw={result.lbw}
+          x={width - insetW - insetMargin}
+          y={insetMargin}
+          width={insetW}
+          height={insetH}
+        />
       )}
     </svg>
   );

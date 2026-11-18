@@ -12,6 +12,9 @@ import hashlib
 import json
 import os
 import shutil
+import sys
+import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +24,7 @@ import cv2
 from fastapi import HTTPException
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm"}
+_CATALOG_LOCK = threading.RLock()
 
 
 def get_library_dir() -> Path:
@@ -55,40 +59,49 @@ def init_library_dirs(library_dir: Optional[Path] = None) -> Tuple[Path, Path, P
 
 def load_library_catalog(library_dir: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
     """Load library.json as a dict mapping clip_id -> entry dict."""
-    lib_dir, _, catalog_file = init_library_dirs(library_dir)
-    if not catalog_file.is_file():
-        return {}
+    with _CATALOG_LOCK:
+        lib_dir, _, catalog_file = init_library_dirs(library_dir)
+        if not catalog_file.is_file():
+            return {}
 
-    try:
-        with open(catalog_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, dict):
-                return data
-            if isinstance(data, list):
-                # Normalize list of entries into dict keyed by clip_id
-                return {item["clip_id"]: item for item in data if isinstance(item, dict) and "clip_id" in item}
-    except Exception as e:
-        print(f"Error loading {catalog_file}: {e}", file=sys.stderr)
-    return {}
+        try:
+            with open(catalog_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+                if isinstance(data, list):
+                    # Normalize list of entries into dict keyed by clip_id
+                    return {item["clip_id"]: item for item in data if isinstance(item, dict) and "clip_id" in item}
+        except Exception as e:
+            print(f"Error loading {catalog_file}: {e}", file=sys.stderr)
+        return {}
 
 
 def save_library_catalog(
     catalog: Dict[str, Dict[str, Any]], library_dir: Optional[Path] = None
 ) -> None:
     """Atomically write library.json using a temp file."""
-    lib_dir, _, catalog_file = init_library_dirs(library_dir)
-    tmp_file = lib_dir / f".library.json.tmp.{uuid.uuid4().hex}"
-    try:
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(catalog, f, indent=2)
-        os.replace(tmp_file, catalog_file)
-    except Exception:
-        if tmp_file.is_file():
-            try:
-                tmp_file.unlink()
-            except OSError:
-                pass
-        raise
+    with _CATALOG_LOCK:
+        lib_dir, _, catalog_file = init_library_dirs(library_dir)
+        tmp_file = lib_dir / f".library.json.tmp.{uuid.uuid4().hex}"
+        try:
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(catalog, f, indent=2)
+            for attempt in range(5):
+                try:
+                    os.replace(tmp_file, catalog_file)
+                    break
+                except PermissionError:
+                    if attempt == 4:
+                        raise
+                    time.sleep(0.02 * (attempt + 1))
+        except Exception:
+            if tmp_file.is_file():
+                try:
+                    tmp_file.unlink()
+                except OSError:
+                    pass
+            raise
 
 
 def generate_clip_id(sha256_hash: str, existing_catalog: Dict[str, Dict[str, Any]]) -> str:

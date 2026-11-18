@@ -7,11 +7,19 @@
 import { frameUrl } from '../api';
 
 const MAX_FRAMES_PER_CLIP = 60;
+const RETRY_COOLDOWN_MS = 1500;
+
+interface InFlightEntry {
+  promise: Promise<ImageBitmap | null>;
+  controller: AbortController;
+}
 
 export class FrameCache {
   private clipCaches = new Map<string, Map<number, ImageBitmap>>();
-  private inFlight = new Map<string, Promise<ImageBitmap | null>>();
+  private inFlight = new Map<string, InFlightEntry>();
   private abortControllers = new Map<string, Set<AbortController>>();
+  private failedUntil = new Map<string, number>();
+  private retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private currentClipId: string | null = null;
   private listeners = new Set<() => void>();
 
@@ -77,6 +85,20 @@ export class FrameCache {
     return null;
   }
 
+  private async fetchAndDecode(
+    clipId: string,
+    frame: number,
+    signal: AbortSignal,
+    cacheMode: RequestCache,
+  ): Promise<ImageBitmap> {
+    const res = await fetch(frameUrl(clipId, frame), { signal, cache: cacheMode });
+    if (!res.ok) {
+      throw new Error(`Failed to load frame ${frame}: HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    return await createImageBitmap(blob);
+  }
+
   public async loadFrame(clipId: string, frame: number): Promise<ImageBitmap | null> {
     const clipMap = this.clipCaches.get(clipId);
     if (clipMap && clipMap.has(frame)) {
@@ -84,8 +106,14 @@ export class FrameCache {
     }
 
     const key = `${clipId}:${frame}`;
-    if (this.inFlight.has(key)) {
-      return this.inFlight.get(key)!;
+    const existing = this.inFlight.get(key);
+    if (existing && !existing.controller.signal.aborted) {
+      return existing.promise;
+    }
+
+    const retryAt = this.failedUntil.get(key);
+    if (retryAt !== undefined && Date.now() < retryAt) {
+      return null;
     }
 
     const controller = new AbortController();
@@ -94,14 +122,24 @@ export class FrameCache {
 
     const promise = (async () => {
       try {
-        const res = await fetch(frameUrl(clipId, frame), {
-          signal: controller.signal,
-        });
-        if (!res.ok) {
-          throw new Error(`Failed to load frame ${frame}: HTTP ${res.status}`);
+        let bitmap: ImageBitmap;
+        try {
+          bitmap = await this.fetchAndDecode(clipId, frame, controller.signal, 'default');
+        } catch (firstErr: unknown) {
+          if (firstErr instanceof DOMException && firstErr.name === 'AbortError') {
+            return null;
+          }
+          // Bypass a potentially poisoned browser HTTP cache entry (e.g. a truncated
+          // JPEG cached earlier with immutable headers) and overwrite it on success.
+          bitmap = await this.fetchAndDecode(clipId, frame, controller.signal, 'reload');
         }
-        const blob = await res.blob();
-        const bitmap = await createImageBitmap(blob);
+
+        this.failedUntil.delete(key);
+        const pendingTimer = this.retryTimers.get(key);
+        if (pendingTimer !== undefined) {
+          clearTimeout(pendingTimer);
+          this.retryTimers.delete(key);
+        }
 
         // Put in LRU cache
         let targetMap = this.clipCaches.get(clipId);
@@ -127,14 +165,27 @@ export class FrameCache {
           return null;
         }
         console.warn(`Error loading frame ${frame} of ${clipId}:`, err);
+        this.failedUntil.set(key, Date.now() + RETRY_COOLDOWN_MS);
+        if (!this.retryTimers.has(key)) {
+          const timer = setTimeout(() => {
+            this.retryTimers.delete(key);
+            this.failedUntil.delete(key);
+            if (this.currentClipId === clipId) {
+              this.notify();
+            }
+          }, RETRY_COOLDOWN_MS);
+          this.retryTimers.set(key, timer);
+        }
         return null;
       } finally {
-        this.inFlight.delete(key);
+        if (this.inFlight.get(key)?.controller === controller) {
+          this.inFlight.delete(key);
+        }
         controllers?.delete(controller);
       }
     })();
 
-    this.inFlight.set(key, promise);
+    this.inFlight.set(key, { promise, controller });
     return promise;
   }
 
@@ -147,7 +198,9 @@ export class FrameCache {
     const end = Math.min(totalFrames - 1, currentFrame + 10);
 
     for (let f = start; f <= end; f++) {
-      if (!this.hasFrame(clipId, f) && !this.inFlight.has(`${clipId}:${f}`)) {
+      const entry = this.inFlight.get(`${clipId}:${f}`);
+      const active = entry !== undefined && !entry.controller.signal.aborted;
+      if (!this.hasFrame(clipId, f) && !active) {
         void this.loadFrame(clipId, f);
       }
     }
@@ -162,6 +215,9 @@ export class FrameCache {
     this.abortControllers.forEach((set) => set.forEach((ac) => ac.abort()));
     this.abortControllers.clear();
     this.inFlight.clear();
+    this.failedUntil.clear();
+    this.retryTimers.forEach((timer) => clearTimeout(timer));
+    this.retryTimers.clear();
   }
 }
 

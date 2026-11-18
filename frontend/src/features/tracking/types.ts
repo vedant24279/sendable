@@ -77,6 +77,49 @@ export interface TrajectoryPostPoint {
   conf?: number | null;
 }
 
+// Line-only LBW block (backend/pipeline/lbw_line.py). Geometry is computed in
+// Python; the frontend only draws the integer pixels it is given.
+export type LbwOverall = "OUT_LINE" | "NOT_OUT_LINE" | "UMPIRES_CALL" | "NO_IMPACT";
+export type LbwSide = "off" | "leg" | "centre" | null;
+export type LbwPitchingVerdict =
+  | "in_line" | "outside_off" | "outside_leg" | "outside_side_unknown";
+export type LbwImpactVerdict = LbwPitchingVerdict | "umpires_call";
+export type LbwWicketsVerdict = "HITTING" | "UMPIRES_CALL" | "MISSING";
+export type LbwPixel = [number, number] | null;
+
+export interface LbwPixels {
+  stump_base_left: LbwPixel;
+  stump_base_right: LbwPixel;
+  stump_top_offset_px: number | null;
+  pitching: LbwPixel;
+  impact_ground: LbwPixel;
+  wickets_centre: LbwPixel;
+  wickets_left: LbwPixel;
+  wickets_right: LbwPixel;
+  impact_left: LbwPixel;
+  impact_right: LbwPixel;
+}
+
+export interface LbwResult {
+  mode: "line";
+  batter_hand: "right" | "left" | null;
+  pitching: { x: number; z: number; side: LbwSide; verdict: LbwPitchingVerdict };
+  impact: { x: number; side: LbwSide; verdict: LbwImpactVerdict };
+  wickets: {
+    x: number;
+    sigma: number;
+    sigma_stat?: number;
+    verdict: LbwWicketsVerdict;
+    margin_m: number;
+    stable: boolean;
+  };
+  height: null;
+  overall: LbwOverall;
+  notes: string[];
+  slope_flag: boolean;
+  pixels?: LbwPixels;
+}
+
 export interface TrackingResult {
   schema_version: 1;
   job_id: string;
@@ -101,6 +144,8 @@ export interface TrackingResult {
   };
   trajectory: TrajectoryPoint[];
   trajectory_post?: TrajectoryPostPoint[];
+  /** Present only when the job ran with TRACKER_LBW_MODE=line and an impact was found. */
+  lbw?: LbwResult | null;
   segments: {
     render_mode?: string;
     seg_a_start_sec: number;

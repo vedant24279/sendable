@@ -9,6 +9,8 @@ import json
 import os
 import re
 import sys
+import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -238,45 +240,85 @@ def get_current_label_state(clip_id: str) -> tuple[str, Optional[str]]:
     return "none", None
 
 
+_CACHE_LOCKS_GUARD = threading.Lock()
+_CACHE_LOCKS: Dict[str, threading.Lock] = {}
+
+
+def _clip_cache_lock(clip_id: str) -> threading.Lock:
+    with _CACHE_LOCKS_GUARD:
+        lock = _CACHE_LOCKS.get(clip_id)
+        if lock is None:
+            lock = threading.Lock()
+            _CACHE_LOCKS[clip_id] = lock
+        return lock
+
+
 def ensure_clip_cached(
     clip_id: str, video_path: Path, expected_frame_count: Optional[int] = None
 ) -> int:
     """
     Sequentially decode and disk-cache every frame as JPEG (quality 92).
     Returns total decoded frame count. Only stores {n}.jpg files in the folder.
+
+    Serialized per clip_id so parallel frame requests never spawn multiple
+    concurrent FFmpeg decoders or overwrite frames mid-read.
     """
-    clip_cache_dir = CACHE_DIR / clip_id
-    clip_cache_dir.mkdir(parents=True, exist_ok=True)
+    with _clip_cache_lock(clip_id):
+        clip_cache_dir = CACHE_DIR / clip_id
+        clip_cache_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check if already cached (only JPEG frames)
-    existing_jpgs = list(clip_cache_dir.glob("*.jpg"))
-    if expected_frame_count is not None and len(existing_jpgs) == expected_frame_count:
-        return len(existing_jpgs)
-    elif expected_frame_count is None and len(existing_jpgs) > 0:
-        return len(existing_jpgs)
+        # Check if already cached (non-empty numeric JPEG frames only)
+        existing_jpgs = [
+            p
+            for p in clip_cache_dir.glob("*.jpg")
+            if p.stem.isdigit() and p.stat().st_size > 0
+        ]
+        if expected_frame_count is not None and len(existing_jpgs) == expected_frame_count:
+            return len(existing_jpgs)
+        elif expected_frame_count is None and len(existing_jpgs) > 0:
+            return len(existing_jpgs)
 
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        raise HTTPException(
-            status_code=500,
-            detail=f"Cannot open video for clip {clip_id}: {video_path}",
-        )
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            raise HTTPException(
+                status_code=500,
+                detail=f"Cannot open video for clip {clip_id}: {video_path}",
+            )
 
-    idx = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        frame_file = clip_cache_dir / f"{idx}.jpg"
-        cv2.imwrite(
-            str(frame_file),
-            frame,
-            [int(cv2.IMWRITE_JPEG_QUALITY), 92],
-        )
-        idx += 1
-    cap.release()
+        idx = 0
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                ok, encoded = cv2.imencode(
+                    ".jpg",
+                    frame,
+                    [int(cv2.IMWRITE_JPEG_QUALITY), 92],
+                )
+                if not ok:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Failed to encode frame {idx} for clip {clip_id}",
+                    )
+                frame_file = clip_cache_dir / f"{idx}.jpg"
+                tmp_file = clip_cache_dir / f".{idx}.{uuid.uuid4().hex}.tmp.jpg"
+                try:
+                    with open(tmp_file, "wb") as out_f:
+                        out_f.write(encoded.tobytes())
+                    os.replace(tmp_file, frame_file)
+                except Exception:
+                    if tmp_file.is_file():
+                        try:
+                            tmp_file.unlink()
+                        except OSError:
+                            pass
+                    raise
+                idx += 1
+        finally:
+            cap.release()
 
-    return idx
+        return idx
 
 
 @app.get("/api/health")

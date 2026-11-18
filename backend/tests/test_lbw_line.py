@@ -232,3 +232,59 @@ def test_output_is_json_serialisable():
     json.dumps(out)
     assert out["wickets"]["stable"] in (True, False)
     assert isinstance(out["notes"], list) and len(out["notes"]) >= 2
+
+
+def test_sigma_includes_model_term_in_quadrature():
+    kwargs, _ = _synthetic(0.05, -0.01)
+    w = compute_lbw_line(**kwargs)["wickets"]
+    assert lbw_line.MODEL_SIGMA_M == pytest.approx(0.07)
+    assert w["sigma_stat"] < w["sigma"]
+    assert w["sigma"] == pytest.approx(
+        math.sqrt(w["sigma_stat"] ** 2 + lbw_line.MODEL_SIGMA_M ** 2), abs=2e-4
+    )
+    # stable keeps using the combined sigma
+    assert w["stable"] == (abs(w["margin_m"]) > 2.0 * w["sigma"])
+
+
+def test_ground_to_pixel_known_points():
+    _, H_inv = fit_ground_homography(CORNERS)
+    # The four crease corners project back exactly onto their pixels.
+    assert lbw_line.ground_to_pixel(H_inv, -1.32, 1.22) == [660, 520]
+    assert lbw_line.ground_to_pixel(H_inv, +1.32, 1.22) == [1260, 520]
+    assert lbw_line.ground_to_pixel(H_inv, -1.32, 18.90) == [520, 960]
+    assert lbw_line.ground_to_pixel(H_inv, +1.32, 18.90) == [1400, 960]
+    # A synthetic interior point matches the reference projection.
+    u, v = _ground_to_pixel(H_inv, 0.3, 5.0)
+    assert lbw_line.ground_to_pixel(H_inv, 0.3, 5.0) == [int(round(u)), int(round(v))]
+
+
+def test_pixels_block_matches_homography():
+    kwargs, _ = _synthetic(0.05, -0.01)
+    out = compute_lbw_line(**kwargs)
+    px = out["pixels"]
+    _, H_inv = fit_ground_homography(CORNERS)
+
+    def proj(X, Z):
+        u, v = _ground_to_pixel(H_inv, X, Z)
+        return [int(round(u)), int(round(v))]
+
+    X_b, Z_b = out["pitching"]["x"], out["pitching"]["z"]
+    X_i, X_s, s = out["impact"]["x"], out["wickets"]["x"], out["wickets"]["sigma"]
+    assert px["stump_base_left"] == proj(-STUMP_HALF_WIDTH_M, 0.0)
+    assert px["stump_base_right"] == proj(+STUMP_HALF_WIDTH_M, 0.0)
+    for key, (X, Z) in {
+        "pitching": (X_b, Z_b),
+        "impact_ground": (X_i, lbw_line.IMPACT_Z_M),
+        "wickets_centre": (X_s, 0.0),
+        "wickets_left": (X_s - s, 0.0),
+        "wickets_right": (X_s + s, 0.0),
+    }.items():
+        got, exp = px[key], proj(X, Z)
+        assert abs(got[0] - exp[0]) <= 1 and abs(got[1] - exp[1]) <= 1, key  # inputs rounded to 4 dp
+    b0 = lbw_line.pixels_per_metre_across(H_inv, 0.0, 0.0)
+    assert px["stump_top_offset_px"] == int(round(0.711 * b0))
+    # impact ribbon is +-PIXEL_SIGMA_PX wide around the impact point: 5 px across.
+    width = math.hypot(px["impact_right"][0] - px["impact_left"][0],
+                       px["impact_right"][1] - px["impact_left"][1])
+    assert width == pytest.approx(2 * lbw_line.PIXEL_SIGMA_PX, abs=1.5)
+    assert all(isinstance(c, int) for k, v in px.items() if isinstance(v, list) for c in v)

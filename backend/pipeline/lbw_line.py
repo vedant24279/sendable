@@ -47,6 +47,11 @@ PIXEL_SIGMA_PX: float = 2.5         # lateral pixel uncertainty of the impact po
 # Dimensionless sigma of dX/dZ used when fewer than 3 points allow a slope fit
 # (the slope is then forced to 0 and slope_flag is set).
 SLOPE_FLAG_SIGMA_RATIO: float = 0.05
+# Provisional model uncertainty on X_s (metres): the line model and the lifted-ballistic
+# probe disagree by about 10 cm RMS on X_s, so each carries about 7 cm. To be calibrated
+# once not-out clips exist. Added in quadrature to the statistical sigma.
+MODEL_SIGMA_M: float = 0.07
+STUMP_HEIGHT_M: float = 0.711
 
 _CORNER_KEYS: Tuple[str, ...] = ("bat_L", "bat_R", "bowl_L", "bowl_R")
 _WORLD_CORNERS: Dict[str, Tuple[float, float]] = {
@@ -113,6 +118,48 @@ def pixels_per_metre_across(H_inv: np.ndarray, X: float, Z: float) -> float:
     du = (H_inv[0, 0] - u * H_inv[2, 0]) / w
     dv = (H_inv[1, 0] - v * H_inv[2, 0]) / w
     return float(math.hypot(du, dv))
+
+
+def ground_to_pixel(H_inv: np.ndarray, X: float, Z: float) -> Optional[List[int]]:
+    """Map ground (X, Z) in metres to an integer image pixel [u, v]; None when it cannot be projected."""
+    w = H_inv[2, 0] * X + H_inv[2, 1] * Z + H_inv[2, 2]
+    if abs(w) < 1e-12:
+        return None
+    u = (H_inv[0, 0] * X + H_inv[0, 1] * Z + H_inv[0, 2]) / w
+    v = (H_inv[1, 0] * X + H_inv[1, 1] * Z + H_inv[1, 2]) / w
+    if not (math.isfinite(u) and math.isfinite(v)):
+        return None
+    return [int(round(u)), int(round(v))]
+
+
+def _pixels_block(
+    H_inv: np.ndarray,
+    X_b: float,
+    Z_b: float,
+    X_i: float,
+    X_s: float,
+    sigma: float,
+    b_px: float,
+) -> Dict[str, Any]:
+    """Integer image pixels of the LBW graphic points, all through the ground homography.
+
+    stump_top_offset_px uses the across-pitch scale at the stump base (the ground homography
+    carries no vertical information), matching how process.py sizes stumps in pixels.
+    """
+    half_track = PIXEL_SIGMA_PX / b_px
+    b0 = pixels_per_metre_across(H_inv, 0.0, 0.0)
+    return {
+        "stump_base_left": ground_to_pixel(H_inv, -STUMP_HALF_WIDTH_M, 0.0),
+        "stump_base_right": ground_to_pixel(H_inv, +STUMP_HALF_WIDTH_M, 0.0),
+        "stump_top_offset_px": int(round(STUMP_HEIGHT_M * b0)) if math.isfinite(b0) else None,
+        "pitching": ground_to_pixel(H_inv, X_b, Z_b),
+        "impact_ground": ground_to_pixel(H_inv, X_i, IMPACT_Z_M),
+        "wickets_centre": ground_to_pixel(H_inv, X_s, 0.0),
+        "wickets_left": ground_to_pixel(H_inv, X_s - sigma, 0.0),
+        "wickets_right": ground_to_pixel(H_inv, X_s + sigma, 0.0),
+        "impact_left": ground_to_pixel(H_inv, X_i - half_track, IMPACT_Z_M),
+        "impact_right": ground_to_pixel(H_inv, X_i + half_track, IMPACT_Z_M),
+    }
 
 
 # ── Sides and verdicts ──────────────────────────────────────────────────────
@@ -274,11 +321,12 @@ def compute_lbw_line(
     else:
         sigma_ratio = math.sqrt((se_vx / vz) ** 2 + (ratio * sigma_vz / vz) ** 2)
     b_px = pixels_per_metre_across(H_inv, X_i, IMPACT_Z_M)
-    sigma = math.sqrt(
+    sigma_stat = math.sqrt(
         (PIXEL_SIGMA_PX / b_px) ** 2
         + (IMPACT_Z_SIGMA_M * abs(ratio)) ** 2
         + (IMPACT_Z_M * sigma_ratio) ** 2
     )
+    sigma = math.sqrt(sigma_stat ** 2 + MODEL_SIGMA_M ** 2)
 
     # 5-6. Sides and verdicts.
     p_verdict = _pitching_verdict(X_b, hand)
@@ -322,6 +370,7 @@ def compute_lbw_line(
         "wickets": {
             "x": round(X_s, 4),
             "sigma": round(sigma, 4),
+            "sigma_stat": round(sigma_stat, 4),
             "verdict": w_verdict,
             "margin_m": round(margin, 4),
             "stable": stable,
@@ -330,6 +379,7 @@ def compute_lbw_line(
         "overall": overall,
         "notes": notes,
         "slope_flag": bool(slope_flag),
+        "pixels": _pixels_block(H_inv, X_b, Z_b, X_i, X_s, sigma, b_px),
     }
 
 

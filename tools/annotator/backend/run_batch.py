@@ -153,6 +153,26 @@ def parse_env_vars(raw_envs: Optional[Sequence[str]]) -> Dict[str, str]:
     return parsed
 
 
+def clip_subprocess_env(
+    sub_env: Optional[Dict[str, str]],
+    label: Dict[str, Any],
+    hand_from_labels: bool,
+) -> Optional[Dict[str, str]]:
+    """Environment for one run_clip subprocess.
+
+    With hand_from_labels, TRACKER_BATTER_HAND is set from the label's batter_hand
+    ("right" / "left") and removed when the label has none, overriding any batch-wide value.
+    """
+    if not hand_from_labels:
+        return sub_env
+    env = dict(sub_env if sub_env is not None else os.environ)
+    env.pop("TRACKER_BATTER_HAND", None)
+    hand = label.get("batter_hand")
+    if isinstance(hand, str) and hand.strip().lower() in ("right", "left"):
+        env["TRACKER_BATTER_HAND"] = hand.strip().lower()
+    return env
+
+
 def run_batch(
     *,
     run_name: str,
@@ -163,6 +183,7 @@ def run_batch(
     labels_dir: Optional[Path] = None,
     library_dir: Optional[Path] = None,
     runs_dir: Optional[Path] = None,
+    hand_from_labels: bool = False,
 ) -> Dict[str, Any]:
     resolved_labels_dir = (labels_dir or get_default_labels_dir()).resolve()
     resolved_library_dir = (library_dir or get_library_dir()).resolve()
@@ -292,7 +313,7 @@ def run_batch(
             proc = subprocess.run(
                 cmd,
                 cwd=str(REPO_ROOT),
-                env=sub_env,
+                env=clip_subprocess_env(sub_env, label, hand_from_labels),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -410,6 +431,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         metavar="KEY=VALUE",
         help="Repeatable environment variable overrides passed to every run_clip subprocess.",
     )
+    parser.add_argument(
+        "--hand-from-labels",
+        action="store_true",
+        help="Set TRACKER_BATTER_HAND per clip from the label's batter_hand (unset when null).",
+    )
     return parser.parse_args(argv)
 
 
@@ -428,6 +454,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         labels_dir=args.labels_dir,
         library_dir=args.library_dir,
         runs_dir=args.runs_dir,
+        hand_from_labels=args.hand_from_labels,
     )
     return 0
 
