@@ -6,9 +6,9 @@
   "mode": "assisted",
   "status": "final",
   "created_at": "2026-11-13T08:25:05.216Z",
-  "updated_at": "2026-11-13T08:29:12.815Z",
+  "updated_at": "2026-11-16T09:51:14.545Z",
   "ball_colour": "pink",
-  "batter_hand": "right",
+  "batter_hand": "left",
   "bowler_type": "pace",
   "lighting": "bright",
   "release": {

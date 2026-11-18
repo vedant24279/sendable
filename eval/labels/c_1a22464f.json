@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "clip_id": "c_1a22464f",
+  "split": null,
+  "annotator": "vedant",
+  "mode": "assisted",
+  "status": "final",
+  "created_at": "2026-11-16T07:40:14.772Z",
+  "updated_at": "2026-11-16T07:45:34.811Z",
+  "ball_colour": "red",
+  "batter_hand": "right",
+  "bowler_type": "pace",
+  "lighting": "low",
+  "release": {
+    "frame": 4,
+    "x": 853.9,
+    "y": 580.6
+  },
+  "bounce": {
+    "frame": 13,
+    "x": 926.7,
+    "y": 484.8
+  },
+  "impact": {
+    "type": "pad",
+    "frame": 19,
+    "x": 973.6,
+    "y": 241.9
+  },
+  "last_visible_frame": 33,
+  "lbw": "out",
+  "reference_decision": null,
+  "source_group": null,
+  "calibration_gt": {
+    "points": {
+      "bat_L": [
+        784.3,
+        352.5
+      ],
+      "bat_R": [
+        1171.9,
+        352.9
+      ],
+      "bowl_L": [
+        748.6,
+        935.7
+      ],
+      "bowl_R": [
+        1211.9,
+        935.8
+      ],
+      "bat_stump": [
+        977.2,
+        319.1
+      ],
+      "bowl_stump": [
+        981.3,
+        983.4
+      ]
+    },
+    "source": "manual",
+    "residual_px": 1.144799788445074,
+    "stump_confirmed": {
+      "bat_stump": true,
+      "bowl_stump": true
+    },
+    "updated_at": "2026-11-16T07:42:12.270Z"
+  },
+  "flags": [],
+  "notes": ""
+}

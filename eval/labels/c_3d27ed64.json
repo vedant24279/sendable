@@ -6,9 +6,9 @@
   "mode": "assisted",
   "status": "final",
   "created_at": "2026-11-12T13:23:30.860Z",
-  "updated_at": "2026-11-12T13:28:01.921Z",
+  "updated_at": "2026-11-16T09:50:43.015Z",
   "ball_colour": "pink",
-  "batter_hand": "right",
+  "batter_hand": "left",
   "bowler_type": "pace",
   "lighting": "bright",
   "release": {
@@ -29,6 +29,8 @@
   },
   "last_visible_frame": 60,
   "lbw": "out",
+  "reference_decision": null,
+  "source_group": null,
   "calibration_gt": {
     "points": {
       "bat_L": [

@@ -6,7 +6,7 @@
   "mode": "assisted",
   "status": "final",
   "created_at": "2026-11-13T08:49:25.343Z",
-  "updated_at": "2026-11-13T08:52:25.552Z",
+  "updated_at": "2026-11-16T07:40:04.221Z",
   "ball_colour": "red",
   "batter_hand": "right",
   "bowler_type": "pace",
@@ -27,7 +27,7 @@
     "x": 972.4,
     "y": 382.4
   },
-  "last_visible_frame": 33,
+  "last_visible_frame": 32,
   "lbw": "out",
   "reference_decision": null,
   "source_group": null,

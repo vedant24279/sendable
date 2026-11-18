@@ -18,3 +18,4 @@ tools/annotator/calib_report.csv
 backend/.venv-pipeline/
 eval/runs/
 eval/labels/_audit.jsonl
+frontend/dist/
