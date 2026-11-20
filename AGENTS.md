@@ -14,3 +14,4 @@ RULES
 9. If you are not sure about something, say so. Do not invent results or file contents.
 10. End every task with a REPORT: files changed, how to run, test output, open problems.
 11. Never stop, restart or repoint the running servers on ports 8765 and 5173; for tests use other ports and temp LABELS_DIR.
+12. Reports must stay under 60 lines: headline numbers only (no full per-clip tables, no pasted logs or diffs) unless the prompt explicitly asks for them. Write long tables to eval/analysis or eval/reports and give the path.
